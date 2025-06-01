@@ -112,13 +112,13 @@ class QueryTemplateReplacerSpec extends Specification {
     def "处理range查询中的模板"() {
         given:
         def dsl = '''{
-            "range": {
-                "age": {
-                    "gte": "{minAge}",
-                    "lte": "{maxAge}"
-                }
+        "range": {
+            "age": {
+                "gte": "{minAge}",
+                "lte": "{maxAge}"
             }
-        }'''
+        }
+    }'''
         def params = [minAge: 18]
 
         when:
@@ -126,12 +126,134 @@ class QueryTemplateReplacerSpec extends Specification {
 
         then:
         JSON.parse(result) == JSON.parse('''{
-            "range": {
-                "age": {
-                    "gte": 18
-                }
+        "range": {
+            "age": {
+                "gte": 18
             }
-        }''')
+        }
+    }''')
+    }
+
+    def "处理range查询中的多个字段"() {
+        given:
+        def dsl = '''{
+        "range": {
+            "age": {
+                "gte": "{minAge}",
+                "lte": "{maxAge}"
+            },
+            "price": {
+                "gte": "{minPrice}"
+            }
+        }
+    }'''
+        def params = [minAge: 18, minPrice: 100]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        JSON.parse(result) == JSON.parse('''{
+        "range": {
+            "age": {
+                "gte": 18
+            },
+            "price": {
+                "gte": 100
+            }
+        }
+    }''')
+    }
+
+    def "处理range查询中的部分未解析变量"() {
+        given:
+        def dsl = '''{
+        "range": {
+            "age": {
+                "gte": "{minAge}",
+                "lte": "{maxAge}"
+            }
+        }
+    }'''
+        def params = [maxAge: 65] // 只提供maxAge，不提供minAge
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        JSON.parse(result) == JSON.parse('''{
+        "range": {
+            "age": {
+                "lte": 65
+            }
+        }
+    }''')
+    }
+
+    def "处理range查询中的所有变量未解析"() {
+        given:
+        def dsl = '''{
+        "range": {
+            "age": {
+                "gte": "{minAge}",
+                "lte": "{maxAge}"
+            }
+        }
+    }'''
+        def params = [:] // 不提供任何参数
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        JSON.parse(result) == JSON.parse('{}')
+    }
+
+    def "处理range查询中的数字类型"() {
+        given:
+        def dsl = '''{
+        "range": {
+            "price": {
+                "gte": "{minPrice}",
+                "lte": "{maxPrice}"
+            }
+        }
+    }'''
+        def params = [minPrice: 100, maxPrice: 200]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        def parsed = JSON.parse(result)
+        parsed.range.price.gte == 100
+        parsed.range.price.lte == 200
+    }
+
+    def "处理range查询中的日期类型"() {
+        given:
+        def dsl = '''{
+        "range": {
+            "date": {
+                "gte": "{startDate}",
+                "lte": "{endDate}"
+            }
+        }
+    }'''
+        def params = [startDate: "2023-01-01", endDate: "2023-12-31"]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        JSON.parse(result) == JSON.parse('''{
+        "range": {
+            "date": {
+                "gte": "2023-01-01",
+                "lte": "2023-12-31"
+            }
+        }
+    }''')
     }
 
     def "复杂嵌套: 多级bool与混合条件"() {

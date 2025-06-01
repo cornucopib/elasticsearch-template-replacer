@@ -6,8 +6,9 @@ import com.alibaba.fastjson.JSONObject
 
 class QueryTemplateReplacer {
 
+    private static final List<String> COMPLEX_QUERY_TYPES = ["bool", "range", "nested"]
     private static final List<String> LEAF_QUERY_TYPES = [
-            "term", "match", "range", "prefix", "wildcard", "regexp",
+            "term", "match", "prefix", "wildcard", "regexp",
             "fuzzy", "type", "ids", "exists", "match_phrase"
     ]
 
@@ -26,9 +27,13 @@ class QueryTemplateReplacer {
     private void processNode(JSONObject node, Map<String, Object> params) {
         if (node.containsKey("bool")) {
             handleBoolNode(node.getJSONObject("bool"), params)
-            // 处理完bool后检查是否为空
             if (node.getJSONObject("bool").isEmpty()) {
                 node.remove("bool")
+            }
+        } else if (node.containsKey("range")) {
+            handleRangeNode(node.getJSONObject("range"), params)
+            if (node.getJSONObject("range").isEmpty()) {
+                node.remove("range")
             }
         } else {
             handleLeafOrOtherNode(node, params)
@@ -77,6 +82,40 @@ class QueryTemplateReplacer {
                 }
             }
         }
+    }
+
+    private void handleRangeNode(JSONObject rangeNode, Map<String, Object> params) {
+        // 处理range查询的特殊逻辑
+        List<String> fieldsToRemove = []
+
+        rangeNode.each { String fieldName, fieldValue ->
+            if (fieldValue instanceof JSONObject) {
+                JSONObject rangeConditions = (JSONObject) fieldValue
+                List<String> conditionsToRemove = []
+
+                rangeConditions.each { String condition, value ->
+                    if (value instanceof String && isTemplateVariable(value)) {
+                        String varName = extractVarName(value)
+                        if (params.containsKey(varName)) {
+                            // 替换模板变量并保留值类型
+                            Object paramValue = params.get(varName)
+                            rangeConditions.put(condition, paramValue)
+                        } else {
+                            conditionsToRemove.add(condition)
+                        }
+                    }
+                }
+
+                conditionsToRemove.each { rangeConditions.remove(it) }
+
+                // 如果字段的所有条件都被移除，则移除整个字段
+                if (rangeConditions.isEmpty()) {
+                    fieldsToRemove.add(fieldName)
+                }
+            }
+        }
+
+        fieldsToRemove.each { rangeNode.remove(it) }
     }
 
     private boolean shouldRemoveClause(JSONObject clause, Map<String, Object> params) {
@@ -152,6 +191,7 @@ class QueryTemplateReplacer {
                     if (value instanceof String && isTemplateVariable((String) value)) {
                         String varName = extractVarName((String) value)
                         if (params.containsKey(varName)) {
+                            // 保留参数的原生类型（数字、布尔值等）
                             jsonObj.put(key, params.get(varName))
                         }
                     } else {

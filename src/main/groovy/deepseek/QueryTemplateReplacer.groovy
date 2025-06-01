@@ -26,6 +26,10 @@ class QueryTemplateReplacer {
     private void processNode(JSONObject node, Map<String, Object> params) {
         if (node.containsKey("bool")) {
             handleBoolNode(node.getJSONObject("bool"), params)
+            // 处理完bool后检查是否为空
+            if (node.getJSONObject("bool").isEmpty()) {
+                node.remove("bool")
+            }
         } else {
             handleLeafOrOtherNode(node, params)
         }
@@ -37,29 +41,38 @@ class QueryTemplateReplacer {
                 def clauses = boolNode.get(clauseType)
                 if (clauses instanceof JSONArray) {
                     List<Integer> indexesToRemove = []
-                    clauses.eachWithIndex { clause, index ->
+                    JSONArray clauseArray = (JSONArray) clauses
+
+                    // 先递归处理所有子句
+                    clauseArray.eachWithIndex { clause, index ->
                         if (clause instanceof JSONObject) {
-                            if (shouldRemoveClause(clause, params)) {
+                            processNode((JSONObject) clause, params)
+                        }
+                    }
+
+                    // 然后检查哪些子句需要删除
+                    clauseArray.eachWithIndex { clause, index ->
+                        if (clause instanceof JSONObject) {
+                            if (shouldRemoveClause((JSONObject) clause, params)) {
                                 indexesToRemove.add(index)
-                            } else {
-                                processNode(clause, params)
                             }
                         }
                     }
 
                     // 逆序删除避免索引变化
-                    indexesToRemove.reverseEach { clauses.remove(it as int) }
+                    indexesToRemove.reverseEach { clauseArray.remove(it as int) }
 
                     // 删除空子句
-                    if (clauses.isEmpty()) {
+                    if (clauseArray.isEmpty()) {
                         boolNode.remove(clauseType)
                     }
                 } else if (clauses instanceof JSONObject) {
                     // 处理单个对象形式的子句
-                    if (shouldRemoveClause(clauses, params)) {
+                    JSONObject clauseObj = (JSONObject) clauses
+                    processNode(clauseObj, params)
+
+                    if (shouldRemoveClause(clauseObj, params)) {
                         boolNode.remove(clauseType)
-                    } else {
-                        processNode(clauses, params)
                     }
                 }
             }
@@ -67,6 +80,9 @@ class QueryTemplateReplacer {
     }
 
     private boolean shouldRemoveClause(JSONObject clause, Map<String, Object> params) {
+        // 空节点直接删除
+        if (clause.isEmpty()) return true
+
         boolean hasTemplate = containsTemplateVariable(clause)
         boolean hasUnresolvedTemplate = hasUnresolvedTemplateVariable(clause, params)
 
@@ -115,6 +131,13 @@ class QueryTemplateReplacer {
             } else if (value instanceof JSONObject) {
                 // 处理嵌套的非叶子节点
                 processNode((JSONObject) value, params)
+            } else if (value instanceof JSONArray) {
+                // 处理数组中的嵌套对象
+                ((JSONArray) value).each {
+                    if (it instanceof JSONObject) {
+                        processNode((JSONObject) it, params)
+                    }
+                }
             }
         }
 

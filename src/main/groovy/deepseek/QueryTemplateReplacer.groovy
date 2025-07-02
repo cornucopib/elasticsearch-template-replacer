@@ -8,7 +8,7 @@ class QueryTemplateReplacer {
 
     private static final List<String> COMPLEX_QUERY_TYPES = ["bool", "range", "nested"]
     private static final List<String> LEAF_QUERY_TYPES = [
-            "term", "match", "prefix", "wildcard", "regexp",
+            "term", "terms", "match", "prefix", "wildcard", "regexp",
             "fuzzy", "type", "ids", "exists", "match_phrase"
     ]
 
@@ -25,18 +25,129 @@ class QueryTemplateReplacer {
     }
 
     private void processNode(JSONObject node, Map<String, Object> params) {
+        // 处理查询包装器
+        if (node.containsKey("query")) {
+            processNode(node.getJSONObject("query"), params)
+            if (node.getJSONObject("query").isEmpty()) {
+                node.remove("query")
+            }
+            return
+        }
+
+        // 处理特殊查询类型
+        ["nested", "has_child", "has_parent", "function_score"].each { queryType ->
+            if (node.containsKey(queryType)) {
+                JSONObject queryBody = node.getJSONObject(queryType)
+                processNode(queryBody, params)
+                if (queryBody.isEmpty()) {
+                    node.remove(queryType)
+                }
+                return
+            }
+        }
+
+        // 处理地理查询
+        if (node.containsKey("geo_distance") || node.containsKey("geo_bounding_box")) {
+            handleGeoQuery(node, params)
+            return
+        }
+
+        // 处理布尔查询
         if (node.containsKey("bool")) {
             handleBoolNode(node.getJSONObject("bool"), params)
             if (node.getJSONObject("bool").isEmpty()) {
                 node.remove("bool")
             }
-        } else if (node.containsKey("range")) {
+            return
+        }
+
+        // 处理范围查询
+        if (node.containsKey("range")) {
             handleRangeNode(node.getJSONObject("range"), params)
             if (node.getJSONObject("range").isEmpty()) {
                 node.remove("range")
             }
-        } else {
-            handleLeafOrOtherNode(node, params)
+            return
+        }
+
+        // 处理脚本查询
+        if (node.containsKey("script")) {
+            processScript(node.getJSONObject("script"), params)
+            return
+        }
+
+        // 默认处理
+        handleLeafOrOtherNode(node, params)
+    }
+
+    private void handleGeoQuery(JSONObject node, Map<String, Object> params) {
+        ["geo_distance", "geo_bounding_box"].each { geoType ->
+            if (node.containsKey(geoType)) {
+                JSONObject geo = node.getJSONObject(geoType)
+                geo.each { field, value ->
+                    if (value instanceof String) {
+                        // 处理坐标点格式 "lat,lon"
+                        if (value.contains(",")) {
+                            String newValue = value.split(",").collect { coord ->
+                                Object replaced = replaceTemplate(coord.trim(), params)
+                                replaced != null ? replaced.toString() : coord
+                            }.join(",")
+                            geo.put(field, newValue)
+                        } else {
+                            Object replaced = replaceTemplate(value, params)
+                            if (replaced != null) {
+                                geo.put(field, replaced)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void processScript(JSONObject script, Map<String, Object> params) {
+        // 1. 处理脚本参数
+        if (script.containsKey("params")) {
+            JSONObject scriptParams = script.getJSONObject("params")
+            scriptParams.each { key, value ->
+                if (value instanceof String) {
+                    Object replaced = replaceTemplate(value, params)
+                    if (replaced != null) {
+                        scriptParams.put(key, replaced)
+                    }
+                }
+            }
+        }
+
+        // 2. 处理脚本内容（增强版）
+        if (script.containsKey("source")) {
+            String source = script.getString("source")
+            boolean modified = false
+
+            // 处理完整模板变量 {var}
+            def matcher = (source =~ /\{([^{}]+)\}/)
+            while (matcher.find()) {
+                String varName = matcher.group(1)
+                if (params.containsKey(varName)) {
+                    source = source.replace("{${varName}}", params.get(varName).toString())
+                    modified = true
+                }
+            }
+
+            // 处理内联变量（如 doc['price'].value * {discount}）
+            matcher = (source =~ /(\{)([^{}]+)(\})/)
+            while (matcher.find()) {
+                String fullMatch = matcher.group(0)
+                String varName = matcher.group(2)
+                if (params.containsKey(varName)) {
+                    source = source.replace(fullMatch, params.get(varName).toString())
+                    modified = true
+                }
+            }
+
+            if (modified) {
+                script.put("source", source)
+            }
         }
     }
 
@@ -85,7 +196,6 @@ class QueryTemplateReplacer {
     }
 
     private void handleRangeNode(JSONObject rangeNode, Map<String, Object> params) {
-        // 处理range查询的特殊逻辑
         List<String> fieldsToRemove = []
 
         rangeNode.each { String fieldName, fieldValue ->
@@ -94,12 +204,10 @@ class QueryTemplateReplacer {
                 List<String> conditionsToRemove = []
 
                 rangeConditions.each { String condition, value ->
-                    if (value instanceof String && isTemplateVariable(value)) {
-                        String varName = extractVarName(value)
-                        if (params.containsKey(varName)) {
-                            // 替换模板变量并保留值类型
-                            Object paramValue = params.get(varName)
-                            rangeConditions.put(condition, paramValue)
+                    if (value instanceof String) {
+                        Object replaced = replaceTemplate(value, params)
+                        if (replaced != null) {
+                            rangeConditions.put(condition, replaced)
                         } else {
                             conditionsToRemove.add(condition)
                         }
@@ -171,11 +279,14 @@ class QueryTemplateReplacer {
                 // 处理嵌套的非叶子节点
                 processNode((JSONObject) value, params)
             } else if (value instanceof JSONArray) {
-                // 处理数组中的嵌套对象
-                ((JSONArray) value).each {
-                    if (it instanceof JSONObject) {
-                        processNode((JSONObject) it, params)
-                    }
+                // 处理数组中的嵌套对象和模板变量
+                processArray((JSONArray) value, params)
+            } else if (value instanceof String) {
+                Object replaced = replaceTemplate(value, params)
+                if (replaced != null) {
+                    node.put(key, replaced)
+                } else if (isTemplateVariable(value)) {
+                    keysToRemove.add(key)
                 }
             }
         }
@@ -183,26 +294,64 @@ class QueryTemplateReplacer {
         keysToRemove.each { node.remove(it) }
     }
 
+    private void processArray(JSONArray array, Map<String, Object> params) {
+        for (int i = 0; i < array.size(); i++) {
+            def element = array.get(i)
+            switch (element) {
+                case JSONObject:
+                    processNode((JSONObject) element, params)
+                    if (element.isEmpty()) {
+                        array.remove(i)
+                        i--
+                    }
+                    break
+                case JSONArray:
+                    processArray((JSONArray) element, params)
+                    break
+                case String:
+                    Object replaced = replaceTemplate(element, params)
+                    if (replaced != null) {
+                        array.set(i, replaced)
+                    } else if (isTemplateVariable(element)) {
+                        array.remove(i)
+                        i--
+                    }
+                    break
+            }
+        }
+    }
+
     private void replaceTemplates(Object obj, Map<String, Object> params) {
         switch (obj) {
             case JSONObject:
                 JSONObject jsonObj = (JSONObject) obj
                 jsonObj.each { key, value ->
-                    if (value instanceof String && isTemplateVariable((String) value)) {
-                        String varName = extractVarName((String) value)
-                        if (params.containsKey(varName)) {
-                            // 保留参数的原生类型（数字、布尔值等）
-                            jsonObj.put(key, params.get(varName))
+                    if (value instanceof String) {
+                        Object replaced = replaceTemplate(value, params)
+                        if (replaced != null) {
+                            jsonObj.put(key, replaced)
                         }
+                    } else if (value instanceof JSONArray) {
+                        processArray((JSONArray) value, params)
                     } else {
                         replaceTemplates(value, params)
                     }
                 }
                 break
             case JSONArray:
-                ((JSONArray) obj).each { replaceTemplates(it, params) }
+                processArray((JSONArray) obj, params)
                 break
         }
+    }
+
+    // 新增的模板替换方法
+    private Object replaceTemplate(String template, Map<String, Object> params) {
+        if (!isTemplateVariable(template)) {
+            return null // 不是模板变量，返回null表示无需替换
+        }
+
+        String varName = extractVarName(template)
+        return params.containsKey(varName) ? params.get(varName) : null
     }
 
     private static boolean isTemplateVariable(String str) {

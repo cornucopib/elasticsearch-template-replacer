@@ -400,25 +400,115 @@ class QueryTemplateReplacerSpec extends Specification {
     def "处理混合数据类型的值"() {
         given:
         def dsl = '''{
-            "term": {
-                "age": "{age}",
-                "active": "{isActive}",
-                "scores": [100, "{score}", 300]
+        "term": {
+            "age": "{age}",
+            "active": "{isActive}",
+            "scores": [100, "{score}", 300],
+            "nested": {
+                "value": "{nestedValue}"
             }
-        }'''
-        def params = [age: 30, isActive: true, score: 200]
+        }
+    }'''
+        def params = [age: 30, isActive: true, score: 200, nestedValue: "nested123"]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        def parsed = JSON.parse(result)
+        parsed.term.age == 30
+        parsed.term.active == true
+        parsed.term.scores == [100, 200, 300]
+        parsed.term.nested.value == "nested123"
+    }
+
+    def "处理数组中的模板变量"() {
+        given:
+        def dsl = '''{
+        "terms": {
+            "tags": ["{tag1}", "fixed", "{tag2}"]
+        }
+    }'''
+        def params = [tag1: "urgent", tag2: "important"]
 
         when:
         def result = replacer.processQuery(dsl, params)
 
         then:
         JSON.parse(result) == JSON.parse('''{
-            "term": {
-                "age": 30,
-                "active": true,
-                "scores": [100, 200, 300]
-            }
-        }''')
+        "terms": {
+            "tags": ["urgent", "fixed", "important"]
+        }
+    }''')
+    }
+
+    def "处理多维数组中的模板变量"() {
+        given:
+        def dsl = '''{
+        "matrix": [
+            [1, "{value1}"],
+            ["{value2}", 4]
+        ]
+    }'''
+        def params = [value1: 2, value2: 3]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        JSON.parse(result) == JSON.parse('''{
+        "matrix": [
+            [1, 2],
+            [3, 4]
+        ]
+    }''')
+    }
+
+    def "处理数组中的未解析变量"() {
+        given:
+        def dsl = '''{
+        "values": ["{val1}", "fixed", "{val2}"]
+    }'''
+        def params = [val2: "value2"] // 只提供val2，不提供val1
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        JSON.parse(result) == JSON.parse('''{
+        "values": ["fixed", "value2"]
+    }''')
+    }
+
+    def "处理混合数组类型"() {
+        given:
+        def dsl = '''{
+        "data": [
+            10,
+            "{stringValue}",
+            true,
+            "{boolValue}",
+            {
+                "key": "{nestedValue}"
+            },
+            [
+                "{arrayValue}"
+            ]
+        ]
+    }'''
+        def params = [stringValue: "text", boolValue: false, nestedValue: "nested", arrayValue: "array"]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        def parsed = JSON.parse(result)
+        parsed.data[0] == 10
+        parsed.data[1] == "text"
+        parsed.data[2] == true
+        parsed.data[3] == false
+        parsed.data[4].key == "nested"
+        parsed.data[5][0] == "array"
     }
 
     def "处理嵌套模板变量"() {
@@ -449,5 +539,266 @@ class QueryTemplateReplacerSpec extends Specification {
                 }
             }
         }''')
+    }
+
+    def "处理嵌套查询"() {
+        given:
+        def dsl = '''{
+        "nested": {
+            "path": "comments",
+            "query": {
+                "term": {
+                    "comments.text": "{searchTerm}"
+                }
+            }
+        }
+    }'''
+        def params = [searchTerm: "important"]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        JSON.parse(result) == JSON.parse('''{
+        "nested": {
+            "path": "comments",
+            "query": {
+                "term": {
+                    "comments.text": "important"
+                }
+            }
+        }
+    }''')
+    }
+
+    def "处理地理距离查询"() {
+        given:
+        def dsl = '''{
+        "geo_distance": {
+            "distance": "10km",
+            "location": "{lat},{lon}"
+        }
+    }'''
+        def params = [lat: "40.7128", lon: "-74.0060"]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        JSON.parse(result) == JSON.parse('''{
+        "geo_distance": {
+            "distance": "10km",
+            "location": "40.7128,-74.0060"
+        }
+    }''')
+    }
+
+    def "处理部分地理坐标模板"() {
+        given:
+        def dsl = '''{
+        "geo_distance": {
+            "distance": "10km",
+            "location": "40.7128,{lon}"
+        }
+    }'''
+        def params = [lon: "-74.0060"]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        JSON.parse(result) == JSON.parse('''{
+        "geo_distance": {
+            "distance": "10km",
+            "location": "40.7128,-74.0060"
+        }
+    }''')
+    }
+
+    def "处理地理坐标中的未解析变量"() {
+        given:
+        def dsl = '''{
+        "geo_distance": {
+            "distance": "10km",
+            "location": "{lat},{lon}"
+        }
+    }'''
+        def params = [lat: "40.7128"] // 缺少lon参数
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        JSON.parse(result) == JSON.parse('''{
+        "geo_distance": {
+            "distance": "10km",
+            "location": "40.7128,{lon}"
+        }
+    }''')
+    }
+
+    def "处理单个地理坐标变量"() {
+        given:
+        def dsl = '''{
+        "geo_distance": {
+            "distance": "10km",
+            "location": "{coordinates}"
+        }
+    }'''
+        def params = [coordinates: "40.7128,-74.0060"]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        JSON.parse(result) == JSON.parse('''{
+        "geo_distance": {
+            "distance": "10km",
+            "location": "40.7128,-74.0060"
+        }
+    }''')
+    }
+
+    def "处理脚本查询"() {
+        given:
+        def dsl = '''{
+        "script": {
+            "source": "doc['price'].value * {discount}",
+            "params": {
+                "discount": "{discountValue}"
+            }
+        }
+    }'''
+        def params = [discountValue: 0.9]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        def parsed = JSON.parse(result)
+        parsed.script.source == "doc['price'].value * 0.9"
+        parsed.script.params.discount == 0.9
+    }
+
+    def "处理复杂脚本"() {
+        given:
+        def dsl = '''{
+        "script": {
+            "source": "def total = doc['price'].value * {multiplier}; if (params.apply_tax) { total *= {taxRate} }; return total;",
+            "params": {
+                "multiplier": "{multValue}",
+                "apply_tax": "{applyTax}"
+            }
+        }
+    }'''
+        def params = [multValue: 1.1, taxRate: 1.08, applyTax: true]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        def parsed = JSON.parse(result)
+        parsed.script.source == "def total = doc['price'].value * 1.1; if (params.apply_tax) { total *= 1.08 }; return total;"
+        parsed.script.params.multiplier == 1.1
+        parsed.script.params.apply_tax == true
+    }
+
+    def "处理脚本中的嵌套变量"() {
+        given:
+        def dsl = '''{
+        "script": {
+            "source": "return {base} + {bonus};",
+            "params": {
+                "base": "{baseValue}",
+                "bonus": "{bonusValue}"
+            }
+        }
+    }'''
+        def params = [baseValue: 1000, bonusValue: 200]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        def parsed = JSON.parse(result)
+        parsed.script.source == "return 1000 + 200;"
+        parsed.script.params.base == 1000
+        parsed.script.params.bonus == 200
+    }
+
+    def "处理脚本中的未解析变量"() {
+        given:
+        def dsl = '''{
+        "script": {
+            "source": "doc['price'].value * {discount}",
+            "params": {
+                "discount": "{discountValue}"
+            }
+        }
+    }'''
+        def params = [:] // 无参数
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        def parsed = JSON.parse(result)
+        parsed.script.source == "doc['price'].value * {discount}"
+        parsed.script.params.discount == "{discountValue}"
+    }
+
+    def "处理多维数组深度嵌套"() {
+        given:
+        def dsl = '''{
+        "matrix": [
+            [
+                {"value": "{v11}"},
+                [1, "{v12}"]
+            ],
+            [
+                "{v21}",
+                {"nested": "{v22}"}
+            ]
+        ]
+    }'''
+        def params = [v11: "a", v12: "b", v21: "c", v22: "d"]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        JSON.parse(result) == JSON.parse('''{
+        "matrix": [
+            [
+                {"value": "a"},
+                [1, "b"]
+            ],
+            [
+                "c",
+                {"nested": "d"}
+            ]
+        ]
+    }''')
+    }
+
+    def "处理日期类型转换"() {
+        given:
+        def dsl = '''{
+        "range": {
+            "event_date": {
+                "gte": "{startDate}",
+                "format": "yyyy-MM-dd"
+            }
+        }
+    }'''
+        def params = [startDate: "2023-01-01"]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+
+        then:
+        def parsed = JSON.parse(result)
+        parsed.range.event_date.gte instanceof String == false // 应为Date类型
+        parsed.range.event_date.gte.toString() == "2023-01-01"
     }
 }

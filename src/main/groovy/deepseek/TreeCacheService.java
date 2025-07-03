@@ -45,19 +45,27 @@ public class TreeCacheService {
         while (!queue.isEmpty()) {
             String nodeId = queue.poll();
             String key = "node:" + nodeId + ":descendants";
+            logger.info("Processing node: {}", nodeId);
+            logger.debug("Set key: {}", key);
 
-            // 3. 创建当前节点的集合（包含自身）
-            setOps.add(key, nodeId);
+            // 添加自身
+            Long selfResult = setOps.add(key, nodeId);
+            logger.debug("Added self: {} - result: {}", nodeId, selfResult);
 
-            // 4. 合并子节点的子孙集合
+            // 处理子节点
             List<String> children = childrenMap.get(nodeId);
-            if (children != null && !children.isEmpty()) {
-                List<String> childKeys = new ArrayList<>();
-                for (String childId : children) {
-                    childKeys.add("node:" + childId + ":descendants");
-                }
-                // 合并所有子节点集合
-                setOps.unionAndStore(key, childKeys, key);
+            if (children != null) {
+                logger.debug("{} has {} children", nodeId, children.size());
+                List<String> childKeys = children.stream()
+                        .map(childId -> "node:" + childId + ":descendants")
+                        .collect(Collectors.toList());
+
+                Long unionResult = setOps.unionAndStore(key, childKeys, key);
+                logger.debug("Union result: {}", unionResult);
+
+                // 验证合并结果
+                Set<String> currentSet = setOps.members(key);
+                logger.debug("Current set: {}", currentSet);
             }
 
             // 5. 更新父节点状态

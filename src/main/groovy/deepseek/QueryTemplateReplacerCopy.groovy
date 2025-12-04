@@ -3,10 +3,10 @@ package deepseek
 import com.alibaba.fastjson.JSON
 import com.alibaba.fastjson.JSONArray
 import com.alibaba.fastjson.JSONObject
-import java.util.regex.Matcher
 
-class QueryTemplateReplacer {
+class QueryTemplateReplacerCopy {
 
+    private static final List<String> COMPLEX_QUERY_TYPES = ["bool", "range", "nested"]
     private static final List<String> LEAF_QUERY_TYPES = [
             "term", "terms", "match", "prefix", "wildcard", "regexp",
             "fuzzy", "type", "ids", "exists", "match_phrase"
@@ -25,6 +25,7 @@ class QueryTemplateReplacer {
     }
 
     private void processNode(JSONObject node, Map<String, Object> params) {
+        // 处理查询包装器
         if (node.containsKey("query")) {
             processNode(node.getJSONObject("query"), params)
             if (node.getJSONObject("query").isEmpty()) {
@@ -33,6 +34,7 @@ class QueryTemplateReplacer {
             return
         }
 
+        // 处理特殊查询类型
         ["nested", "has_child", "has_parent", "function_score"].each { queryType ->
             if (node.containsKey(queryType)) {
                 JSONObject queryBody = node.getJSONObject(queryType)
@@ -44,11 +46,13 @@ class QueryTemplateReplacer {
             }
         }
 
+        // 处理地理查询
         if (node.containsKey("geo_distance") || node.containsKey("geo_bounding_box")) {
             handleGeoQuery(node, params)
             return
         }
 
+        // 处理布尔查询
         if (node.containsKey("bool")) {
             handleBoolNode(node.getJSONObject("bool"), params)
             if (node.getJSONObject("bool").isEmpty()) {
@@ -57,6 +61,7 @@ class QueryTemplateReplacer {
             return
         }
 
+        // 处理范围查询
         if (node.containsKey("range")) {
             handleRangeNode(node.getJSONObject("range"), params)
             if (node.getJSONObject("range").isEmpty()) {
@@ -65,82 +70,23 @@ class QueryTemplateReplacer {
             return
         }
 
+        // 处理脚本查询（修复版）
         if (node.containsKey("script")) {
             processScript(node.getJSONObject("script"), params)
-            // 如果script为空，移除它
-            if (node.getJSONObject("script").isEmpty()) {
-                node.remove("script")
-            }
             return
         }
 
+        // 默认处理
         handleLeafOrOtherNode(node, params)
     }
 
-    private void processScript(JSONObject script, Map<String, Object> params) {
-        // 先处理脚本参数
-        if (script.containsKey("params")) {
-            JSONObject scriptParams = script.getJSONObject("params")
-            def keysToRemove = []
-
-            scriptParams.each { key, value ->
-                if (value instanceof String) {
-                    Object replaced = replaceTemplate(value, params)
-                    if (replaced != null) {
-                        scriptParams.put(key, replaced)
-                    } else if (isTemplateVariable(value)) {
-                        keysToRemove.add(key)
-                    }
-                }
-            }
-
-            keysToRemove.each { scriptParams.remove(it) }
-
-            // 如果参数为空，移除params
-            if (scriptParams.isEmpty()) {
-                script.remove("params")
-            }
-        }
-
-        // 再处理脚本源代码 - 使用新的替换逻辑
-        if (script.containsKey("source")) {
-            String source = script.getString("source")
-            String newSource = replaceAllTemplatesInScript(source, params)
-            script.put("source", newSource)
-        }
-    }
-
-    private String replaceAllTemplatesInScript(String source, Map<String, Object> params) {
-        // 第2步：使用完全限定的类名，避免歧义
-        def pattern = java.util.regex.Pattern.compile("\\{([^{}]+)\\}")
-        // 特别注意这里，将 Matcher 改为 java.util.regex.Matcher
-        java.util.regex.Matcher matcher = pattern.matcher(source)
-        StringBuffer result = new StringBuffer()
-
-        while (matcher.find()) {
-            String fullMatch = matcher.group(0)
-            String varName = matcher.group(1).trim()
-
-            if (params.containsKey(varName)) {
-                Object replacement = params.get(varName)
-                // 第3步：使用Matcher的正确引用
-                matcher.appendReplacement(result, Matcher.quoteReplacement(replacement.toString()))
-            } else {
-                matcher.appendReplacement(result, Matcher.quoteReplacement(fullMatch))
-            }
-        }
-        matcher.appendTail(result)
-
-        return result.toString()
-    }
-
-    // 其他方法保持不变...
     private void handleGeoQuery(JSONObject node, Map<String, Object> params) {
         ["geo_distance", "geo_bounding_box"].each { geoType ->
             if (node.containsKey(geoType)) {
                 JSONObject geo = node.getJSONObject(geoType)
                 geo.each { field, value ->
                     if (value instanceof String) {
+                        // 处理坐标点格式 "lat,lon"
                         if (value.contains(",")) {
                             String newValue = value.split(",").collect { coord ->
                                 Object replaced = replaceTemplate(coord.trim(), params)
@@ -159,6 +105,57 @@ class QueryTemplateReplacer {
         }
     }
 
+    private void processScript(JSONObject script, Map<String, Object> params) {
+        // 1. 处理脚本参数
+        if (script.containsKey("params")) {
+            JSONObject scriptParams = script.getJSONObject("params")
+            def keysToRemove = []
+            scriptParams.each { key, value ->
+                if (value instanceof String) {
+                    Object replaced = replaceTemplate(value, params)
+                    if (replaced != null) {
+                        scriptParams.put(key, replaced)
+                    } else if (isTemplateVariable(value)) {
+                        keysToRemove.add(key)
+                    }
+                }
+            }
+            keysToRemove.each { scriptParams.remove(it) }
+        }
+
+        // 2. 处理脚本内容（修复版）
+        if (script.containsKey("source")) {
+            String source = script.getString("source")
+            boolean modified = false
+
+            // 使用更精确的匹配模式
+            def matcher = (source =~ /\{([^{}]+)\}/)
+            def matches = []
+
+            // 先收集所有匹配
+            while (matcher.find()) {
+                matches.add([fullMatch: matcher.group(0), varName: matcher.group(1).trim()])
+            }
+
+            // 逆序替换（避免替换后影响后续匹配）
+            matches.reverseEach { match ->
+                String fullMatch = match.fullMatch
+                String varName = match.varName
+
+                if (params.containsKey(varName)) {
+                    Object paramValue = params.get(varName)
+                    String replacement = paramValue.toString()
+                    source = source.replace(fullMatch, replacement)
+                    modified = true
+                }
+            }
+
+            if (modified) {
+                script.put("source", source)
+            }
+        }
+    }
+
     private void handleBoolNode(JSONObject boolNode, Map<String, Object> params) {
         ["must", "should", "must_not", "filter"].each { clauseType ->
             if (boolNode.containsKey(clauseType)) {
@@ -167,12 +164,14 @@ class QueryTemplateReplacer {
                     List<Integer> indexesToRemove = []
                     JSONArray clauseArray = (JSONArray) clauses
 
+                    // 先递归处理所有子句
                     clauseArray.eachWithIndex { clause, index ->
                         if (clause instanceof JSONObject) {
                             processNode((JSONObject) clause, params)
                         }
                     }
 
+                    // 然后检查哪些子句需要删除
                     clauseArray.eachWithIndex { clause, index ->
                         if (clause instanceof JSONObject) {
                             if (shouldRemoveClause((JSONObject) clause, params)) {
@@ -181,12 +180,15 @@ class QueryTemplateReplacer {
                         }
                     }
 
+                    // 逆序删除避免索引变化
                     indexesToRemove.reverseEach { clauseArray.remove(it as int) }
 
+                    // 删除空子句
                     if (clauseArray.isEmpty()) {
                         boolNode.remove(clauseType)
                     }
                 } else if (clauses instanceof JSONObject) {
+                    // 处理单个对象形式的子句
                     JSONObject clauseObj = (JSONObject) clauses
                     processNode(clauseObj, params)
 
@@ -219,6 +221,7 @@ class QueryTemplateReplacer {
 
                 conditionsToRemove.each { rangeConditions.remove(it) }
 
+                // 如果字段的所有条件都被移除，则移除整个字段
                 if (rangeConditions.isEmpty()) {
                     fieldsToRemove.add(fieldName)
                 }
@@ -229,6 +232,7 @@ class QueryTemplateReplacer {
     }
 
     private boolean shouldRemoveClause(JSONObject clause, Map<String, Object> params) {
+        // 空节点直接删除
         if (clause.isEmpty()) return true
 
         boolean hasTemplate = containsTemplateVariable(clause)
@@ -277,8 +281,10 @@ class QueryTemplateReplacer {
                     }
                 }
             } else if (value instanceof JSONObject) {
+                // 处理嵌套的非叶子节点
                 processNode((JSONObject) value, params)
             } else if (value instanceof JSONArray) {
+                // 处理数组中的嵌套对象和模板变量
                 processArray((JSONArray) value, params)
             } else if (value instanceof String) {
                 Object replaced = replaceTemplate(value, params)
@@ -343,9 +349,10 @@ class QueryTemplateReplacer {
         }
     }
 
+    // 新增的模板替换方法
     private Object replaceTemplate(String template, Map<String, Object> params) {
         if (!isTemplateVariable(template)) {
-            return null
+            return null // 不是模板变量，返回null表示无需替换
         }
 
         String varName = extractVarName(template)
@@ -353,11 +360,10 @@ class QueryTemplateReplacer {
     }
 
     private static boolean isTemplateVariable(String str) {
-        if (str == null) return false
-        return str ==~ /^\s*\{[^{}]+\}\s*$/
+        str ==~ /^\{[^{}]+\}$/
     }
 
     private static String extractVarName(String str) {
-        str.replaceAll(/^\s*\{/, "").replaceAll(/\}\s*$/, "").trim()
+        str.substring(1, str.length() - 1)
     }
 }

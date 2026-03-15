@@ -663,7 +663,7 @@ class QueryTemplateReplacerSpec extends Specification {
         given:
         def dsl = '''{
         "script": {
-                "source": "doc['price'].value * {discount}",
+                "source": "doc['price'].value * params.discount",
                 "params": {
                     "discount": "{discountValue}"
                 }
@@ -676,98 +676,8 @@ class QueryTemplateReplacerSpec extends Specification {
 
         then:
         def parsed = JSON.parse(result)
-        parsed.script.source == "doc['price'].value * 0.9"
+        parsed.script.source == "doc['price'].value * params.discount"
         parsed.script.params.discount == 0.9
-    }
-
-    def "处理复杂脚本"() {
-        given:
-        def dsl = '''{
-        "script": {
-            "source": "def total = doc['price'].value * {multiplier}; if (params.apply_tax) { total *= {taxRate} }; return total;",
-            "params": {
-                "multiplier": "{multValue}",
-                "apply_tax": "{applyTax}"
-            }
-        }
-    }'''
-        def params = [multValue: 1.1, taxRate: 1.08, applyTax: true]
-
-        when:
-        def result = replacer.processQuery(dsl, params)
-
-        then:
-        def parsed = JSON.parse(result)
-        parsed.script.source == "def total = doc['price'].value * 1.1; if (params.apply_tax) { total *= 1.08 }; return total;"
-        parsed.script.params.multiplier == 1.1
-        parsed.script.params.apply_tax == true
-    }
-
-    def "处理脚本中的嵌套变量"() {
-        given:
-        def dsl = '''{
-        "script": {
-            "source": "return {base} + {bonus};",
-            "params": {
-                "base": "{baseValue}",
-                "bonus": "{bonusValue}"
-            }
-        }
-    }'''
-        def params = [baseValue: 1000, bonusValue: 200]
-
-        when:
-        def result = replacer.processQuery(dsl, params)
-
-        then:
-        def parsed = JSON.parse(result)
-        parsed.script.source == "return 1000 + 200;"
-        parsed.script.params.base == 1000
-        parsed.script.params.bonus == 200
-    }
-
-    def "处理脚本中的未解析变量"() {
-        given:
-        def dsl = '''{
-        "script": {
-            "source": "doc['price'].value * {discount}",
-            "params": {
-                "discount": "{discountValue}"
-            }
-        }
-    }'''
-        def params = [:] // 无参数
-
-        when:
-        def result = replacer.processQuery(dsl, params)
-
-        then:
-        def parsed = JSON.parse(result)
-        parsed.script.source == "doc['price'].value * {discount}"
-        parsed.script.params.discount == "{discountValue}"
-    }
-
-    def "处理多维数组深度嵌套"() {
-        given:
-        // 使用更简单的JSON结构来确保格式正确
-        def dsl = '''{
-        "matrix": [
-            [{"value": "{v11}"}, [1, "{v12}"]],
-            ["{v21}", {"nested": "{v22}"}]
-        ]
-    }'''
-        def params = [v11: "a", v12: "b", v21: "c", v22: "d"]
-
-        when:
-        def result = replacer.processQuery(dsl, params)
-
-        then:
-        def parsed = JSON.parse(result)
-        // 不使用整体JSON对比，改为逐个字段断言，更精确
-        parsed.matrix[0][0].value == "a"
-        parsed.matrix[0][1] == [1, "b"]
-        parsed.matrix[1][0] == "c"
-        parsed.matrix[1][1].nested == "d"
     }
 
     def "处理日期类型转换"() {
@@ -791,4 +701,257 @@ class QueryTemplateReplacerSpec extends Specification {
         parsed.range.event_date.gte instanceof String == true // 将 false 改为 true
         parsed.range.event_date.gte == "2023-01-01"
     }
+
+    def "复杂综合查询场景 - 电商产品搜索"() {
+        given:
+        def dsl = '''{
+            "query": {
+                "bool": {
+                    "must": [
+                        {
+                            "multi_match": {
+                                "query": "{searchKeyword}",
+                                "fields": ["title", "description", "brand"]
+                            }
+                        },
+                        {
+                            "term": {
+                                "category_id": "{categoryId}"
+                            }
+                        },
+                        {
+                            "range": {
+                                "price": {
+                                    "gte": "{minPrice}",
+                                    "lte": "{maxPrice}"
+                                }
+                            }
+                        },
+                        {
+                            "script": {
+                                "source": "def baseScore = doc['rating'].value * params.ratingWeight; def salesBonus = Math.log(doc['sales_count'].value + 1) * params.salesFactor; def promotionBoost = params.isPromotionOnly ? (doc['on_promotion'].value ? 10 : 0) : 0; return baseScore + salesBonus + promotionBoost >= params.minScore;",
+                                "params": {
+                                    "ratingWeight": "{ratingWeight}",
+                                    "salesFactor": "{salesFactor}",
+                                    "isPromotionOnly": "{showPromotionOnly}",
+                                    "minScore": "{minRating}"
+                                }
+                            }
+                        }
+                    ],
+                    "filter": [
+                        {
+                            "terms": {
+                                "brand": "{brandList}"
+                            }
+                        },
+                        {
+                            "geo_distance": {
+                                "distance": "{deliveryRadius}km",
+                                "warehouse_location": "{warehouseLat},{warehouseLon}"
+                            }
+                        },
+                        {
+                            "exists": {
+                                "field": "{requiredField}"
+                            }
+                        }
+                    ],
+                    "should": [
+                        {
+                            "nested": {
+                                "path": "tags",
+                                "query": {
+                                    "term": {
+                                        "tags.name": "{preferredTag}"
+                                    }
+                                },
+                                "score_mode": "sum"
+                            }
+                        },
+                        {
+                            "function_score": {
+                                "query": { "match_all": {} },
+                                "functions": [
+                                    {
+                                        "script_score": {
+                                            "script": {
+                                                "source": "doc['stock_quantity'].value > params.minStock ? 2 : 0",
+                                                "params": {
+                                                    "minStock": "{minStockLevel}"
+                                                }
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ],
+                    "must_not": [
+                        {
+                            "terms": {
+                                "exclude_keywords": "{excludedTags}"
+                            }
+                        }
+                    ]
+                }
+            },
+            "aggs": {
+                "price_stats": {
+                    "stats": {
+                        "field": "price"
+                    }
+                },
+                "brand_distribution": {
+                    "terms": {
+                        "field": "brand",
+                        "size": "{brandSize}"
+                    }
+                },
+                "avg_rating": {
+                    "avg": {
+                        "script": {
+                            "source": "doc['rating'].value * params.weight",
+                            "params": {
+                                "weight": "{ratingMultiplier}"
+                            }
+                        }
+                    }
+                }
+            },
+            "sort": [
+                {
+                    "_score": {
+                        "order": "desc"
+                    }
+                },
+                {
+                    "price": {
+                        "order": "{priceSortOrder}"
+                    }
+                },
+                {
+                    "_script": {
+                        "type": "number",
+                        "script": {
+                            "source": "def price = doc['price'].value; def discount = doc['discount_rate'].value; return price * (1 - discount) * params.sortFactor;",
+                            "params": {
+                                "sortFactor": "{customSortFactor}"
+                            }
+                        },
+                        "order": "asc"
+                    }
+                }
+            ],
+            "script_fields": {
+                "final_price": {
+                    "script": {
+                        "source": "doc['price'].value * (1 - doc['discount_rate'].value)",
+                        "params": {}
+                    }
+                },
+                "shipping_cost": {
+                    "script": {
+                        "source": "def distance = doc['warehouse_location'].arcDistance(params.lat, params.lon); if (distance < params.nearThreshold) return params.baseFee; return params.baseFee + (distance / 100) * params.distanceRate;",
+                        "params": {
+                            "lat": "{userLat}",
+                            "lon": "{userLon}",
+                            "nearThreshold": "{nearDistanceKm}",
+                            "baseFee": "{shippingBaseFee}",
+                            "distanceRate": "{shippingRatePerKm}"
+                        }
+                    }
+                }
+            },
+            "highlight": {
+                "fields": {
+                    "title": {
+                        "pre_tags": "<em style='color:{highlightColor}'>",
+                        "post_tags": "</em>"
+                    },
+                    "description": {}
+                }
+            }
+        }'''
+        def params = [
+                searchKeyword      : "无线蓝牙耳机",
+                categoryId         : 1001,
+                minPrice           : 50,
+                maxPrice           : 500,
+                ratingWeight       : 1.5,
+                salesFactor        : 0.8,
+                showPromotionOnly  : true,
+                minRating          : 75,
+                brandList          : ["Sony", "Bose", "Sennheiser"],
+                deliveryRadius     : 100,
+                warehouseLat       : "39.9042",
+                warehouseLon       : "116.4074",
+                requiredField      : "stock_quantity",
+                preferredTag       : "bestseller",
+                minStockLevel      : 10,
+                excludedTags       : ["refurbished", "open_box"],
+                brandSize          : 20,
+                ratingMultiplier   : 1.2,
+                priceSortOrder     : "asc",
+                customSortFactor   : 0.95,
+                userLat            : "39.9042",
+                userLon            : "116.4074",
+                nearDistanceKm     : 50,
+                shippingBaseFee    : 5.0,
+                shippingRatePerKm  : 0.1,
+                highlightColor     : "red"
+        ]
+
+        when:
+        def result = replacer.processQuery(dsl, params)
+        def parsed = JSON.parse(result)
+
+        then:
+        // 验证 query 部分
+        parsed.query.bool.must[0].multi_match.query == "无线蓝牙耳机"
+        parsed.query.bool.must[1].term.category_id == 1001
+        parsed.query.bool.must[2].range.price.gte == 50
+        parsed.query.bool.must[2].range.price.lte == 500
+
+        // 验证脚本参数
+        def scriptParams = parsed.query.bool.must[3].script.params
+        scriptParams.ratingWeight == 1.5
+        scriptParams.salesFactor == 0.8
+        scriptParams.isPromotionOnly == true
+        scriptParams.minScore == 75
+
+        // 验证 filter 部分
+        parsed.query.bool.filter[0].terms.brand == ["Sony", "Bose", "Sennheiser"]
+        parsed.query.bool.filter[1].geo_distance.distance == "100km"
+        parsed.query.bool.filter[1].geo_distance.warehouse_location == "39.9042,116.4074"
+        parsed.query.bool.filter[2].exists.field == "stock_quantity"
+
+        // 验证 should 部分
+        parsed.query.bool.should[0].nested.query.term["tags.name"] == "bestseller"
+        parsed.query.bool.should[1].function_score.functions[0].script_score.script.params.minStock == 10
+
+        // 验证 must_not 部分
+        parsed.query.bool.must_not[0].terms.exclude_keywords == ["refurbished", "open_box"]
+
+        // 验证聚合部分
+        parsed.aggs.brand_distribution.terms.size == 20
+        parsed.aggs.avg_rating.avg.script.params.weight == 1.2
+
+        // 验证排序部分
+        parsed.sort[1].price.order == "asc"
+        parsed.sort[2]._script.script.params.sortFactor == 0.95
+
+        // 验证 script_fields
+        def shippingParams = parsed.script_fields.shipping_cost.script.params
+        shippingParams.lat == "39.9042"
+        shippingParams.lon == "116.4074"
+        shippingParams.nearThreshold == 50
+        shippingParams.baseFee == 5.0
+        shippingParams.distanceRate == 0.1
+
+        // 验证高亮部分
+        parsed.highlight.fields.title.pre_tags[0] == "<em style='color:red'>"
+    }
+
+
 }

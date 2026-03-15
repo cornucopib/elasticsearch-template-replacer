@@ -34,6 +34,7 @@ class QueryTemplateReplacer {
             processNode(queryJson, params)
             return queryJson.toJSONString()
         } catch (Exception e) {
+            e.printStackTrace()
             throw new IllegalArgumentException("Invalid DSL format: ${e.message}")
         }
     }
@@ -47,12 +48,25 @@ class QueryTemplateReplacer {
     private void processNode(JSONObject node, Map<String, Object> params) {
         // 处理嵌套的 query 结构
         if (node.containsKey("query")) {
-            processNode(node.getJSONObject("query"), params)
-            // 如果子 query 为空，移除该节点
-            if (node.getJSONObject("query").isEmpty()) {
-                node.remove("query")
+            def queryNode = node.get("query")
+            if(queryNode instanceof JSONObject){
+                processNode(node.getJSONObject("query"), params)
+                // 如果子 query 为空，移除该节点
+                if (node.getJSONObject("query").isEmpty()) {
+                    node.remove("query")
+                }
+                return
+            }else if(queryNode instanceof String){
+                def keysToRemove = []
+                // 处理字符串值
+                Object replaced = replaceTemplate(queryNode, params)
+                if (replaced != null) {
+                    node.put("query", replaced)
+                } else if (isTemplateVariable(queryNode)) {
+                    keysToRemove.add("query")
+                }
+                keysToRemove.each { node.remove(it) }
             }
-            return
         }
 
         // 处理特殊查询类型：nested、has_child、has_parent、function_score
@@ -136,13 +150,6 @@ class QueryTemplateReplacer {
             if (scriptParams.isEmpty()) {
                 script.remove("params")
             }
-        }
-
-        // 再处理脚本源代码 - 使用新的替换逻辑
-        if (script.containsKey("source")) {
-            String source = script.getString("source")
-            String newSource = replaceAllTemplatesInScript(source, params)
-            script.put("source", newSource)
         }
     }
 

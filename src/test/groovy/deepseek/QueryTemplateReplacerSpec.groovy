@@ -382,7 +382,7 @@ class QueryTemplateReplacerSpec extends Specification {
                 }
             }
         }'''
-        def params = [status1: "active"]
+        def params = [status: "active"]
 
         when:
         def result = replacer.processQuery(dsl, params)
@@ -523,7 +523,7 @@ class QueryTemplateReplacerSpec extends Specification {
                 }
             }
         }'''
-        def params = [username1: "john_doe"]
+        def params = [username: "john_doe"]
 
         when:
         def result = replacer.processQuery(dsl, params)

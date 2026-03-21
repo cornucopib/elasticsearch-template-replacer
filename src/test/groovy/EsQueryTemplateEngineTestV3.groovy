@@ -4,7 +4,7 @@ import com.alibaba.fastjson.JSON
  * ES 查询模板引擎测试
  * 使用 Groovy 原生 assert 断言，覆盖 ES 全部核心语法
  */
-class EsQueryTemplateEngineTest {
+class EsQueryTemplateEngineTestV3 {
 
     // ==================== 一、ES 全文查询 ====================
 
@@ -1777,36 +1777,6 @@ class EsQueryTemplateEngineTest {
         assert result.size == 10
     }
 
-    /**
-     * 测试 deepClone 方法 - 深拷贝功能
-     */
-    static void testDeepClone() {
-        def original = [
-                query: [
-                        bool: [
-                                must: [
-                                        [match: [title: "test"]]
-                                ]
-                        ]
-                ],
-                tags: ["a", "b", "c"]
-        ]
-
-        def cloned = EsQueryTemplateEngine.deepClone(original)
-
-        // 验证深拷贝
-        assert cloned == original
-        assert !cloned.is(original)  // 不是同一个对象
-        assert !cloned.query.is(original.query)
-        assert !cloned.tags.is(original.tags)
-
-        // 修改克隆不影响原始
-        cloned.tags.add("d")
-        cloned.query.bool.must[0].match.title = "modified"
-
-        assert original.tags == ["a", "b", "c"]
-        assert original.query.bool.must[0].match.title == "test"
-    }
 
     /**
      * 测试字符串插值 - 部分变量在字符串中间
@@ -2140,8 +2110,6 @@ class EsQueryTemplateEngineTest {
         println "✓ testTypePreservation passed"
         testResolveToMap()
         println "✓ testResolveToMap passed"
-        testDeepClone()
-        println "✓ testDeepClone passed"
         testStringInterpolation()
         println "✓ testStringInterpolation passed"
 

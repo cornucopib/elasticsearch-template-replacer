@@ -14,7 +14,7 @@ import java.util.regex.Pattern
  *
  * 所有方法均为 static，无状态，线程安全
  */
-class EsQueryTemplateEngine {
+class EsQueryTemplateEngineV1 {
 
     // 移除标记：用于标识需要在宽松模式下移除的节点
     private static final Object REMOVE_SENTINEL = new Object()

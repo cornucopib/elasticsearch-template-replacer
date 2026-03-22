@@ -206,13 +206,19 @@ class EsQueryTemplateEngineV3 {
         }
 
         Set<String> variables = new LinkedHashSet<>()
-        Matcher matcher = VAR_MATCHER_CACHE.get().reset(templateJson)
 
-        while (matcher.find()) {
-            variables.add(matcher.group(1))
+        Matcher matcher = VAR_MATCHER_CACHE.get()
+        try {
+            matcher.reset(templateJson)
+
+            while (matcher.find()) {
+                variables.add(matcher.group(1))
+            }
+
+            return variables
+        }finally {
+            matcher.reset("")
         }
-
-        return variables
     }
 
 
@@ -437,61 +443,66 @@ class EsQueryTemplateEngineV3 {
     private static Object resolveString(String str, Map<String, Object> params, boolean strict) {
         if (str == null || str.isEmpty()) return str
 
-        Matcher m = VAR_MATCHER_CACHE.get().reset(str)
+        Matcher m = VAR_MATCHER_CACHE.get()
+        try {
+            m.reset(str)
 
-        // === 第一段：完全匹配检查（复用 VAR_PATTERN + matches()）===
-        // 【优化】matches() 要求整个字符串匹配正则，等价于 ^{var}$，无需单独的 EXACT_VAR_PATTERN
-        if (m.matches()) {
-            String varName = m.group(1)
-            if (params.containsKey(varName)) {
-                return params.get(varName)
-            } else if (strict) {
-                throw new IllegalArgumentException("缺失变量: ${varName}")
-            } else {
+            // === 第一段：完全匹配检查（复用 VAR_PATTERN + matches()）===
+            // 【优化】matches() 要求整个字符串匹配正则，等价于 ^{var}$，无需单独的 EXACT_VAR_PATTERN
+            if (m.matches()) {
+                String varName = m.group(1)
+                if (params.containsKey(varName)) {
+                    return params.get(varName)
+                } else if (strict) {
+                    throw new IllegalArgumentException("缺失变量: ${varName}")
+                } else {
+                    return REMOVE_SENTINEL
+                }
+            }
+
+            // === 第二段：单次遍历完成"有无变量"判断和插值替换 ===
+            // 【优化】原版先 find() 判断有无变量，reset() 后再 while(find()) 遍历，共 2 次扫描
+            // 现在合并为 1 次 while(find()) 遍历，用 found 标记判断有无变量
+            m.reset()
+            // 注：Java 8 的 Matcher.appendReplacement 不支持 StringBuilder，必须用 StringBuffer
+            StringBuffer sb = new StringBuffer()
+            boolean found = false
+            boolean allMissing = true
+            boolean anyMissing = false
+
+            while (m.find()) {
+                found = true
+                String varName = m.group(1)
+                String replacement
+
+                if (params.containsKey(varName)) {
+                    allMissing = false
+                    Object value = params.get(varName)
+                    replacement = value?.toString() ?: ''
+                } else if (strict) {
+                    throw new IllegalArgumentException("缺失变量: ${varName}")
+                } else {
+                    anyMissing = true
+                    replacement = m.group(0)
+                }
+
+                m.appendReplacement(sb, Matcher.quoteReplacement(replacement))
+            }
+
+            // 无变量占位符，直接返回原字符串
+            if (!found) return str
+
+            m.appendTail(sb)
+
+            // 宽松模式下，如果所有变量都缺失，标记整个字符串为移除
+            if (!strict && allMissing && anyMissing) {
                 return REMOVE_SENTINEL
             }
+
+            return sb.toString()
+        }finally {
+            m.reset("")
         }
-
-        // === 第二段：单次遍历完成"有无变量"判断和插值替换 ===
-        // 【优化】原版先 find() 判断有无变量，reset() 后再 while(find()) 遍历，共 2 次扫描
-        // 现在合并为 1 次 while(find()) 遍历，用 found 标记判断有无变量
-        m.reset()
-        // 注：Java 8 的 Matcher.appendReplacement 不支持 StringBuilder，必须用 StringBuffer
-        StringBuffer sb = new StringBuffer()
-        boolean found = false
-        boolean allMissing = true
-        boolean anyMissing = false
-
-        while (m.find()) {
-            found = true
-            String varName = m.group(1)
-            String replacement
-
-            if (params.containsKey(varName)) {
-                allMissing = false
-                Object value = params.get(varName)
-                replacement = value?.toString() ?: ''
-            } else if (strict) {
-                throw new IllegalArgumentException("缺失变量: ${varName}")
-            } else {
-                anyMissing = true
-                replacement = m.group(0)
-            }
-
-            m.appendReplacement(sb, Matcher.quoteReplacement(replacement))
-        }
-
-        // 无变量占位符，直接返回原字符串
-        if (!found) return str
-
-        m.appendTail(sb)
-
-        // 宽松模式下，如果所有变量都缺失，标记整个字符串为移除
-        if (!strict && allMissing && anyMissing) {
-            return REMOVE_SENTINEL
-        }
-
-        return sb.toString()
     }
 
     /**

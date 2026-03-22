@@ -26,7 +26,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "title", keyword: "Spring Boot 入门教程", analyzer: "ik_max_word", operator: "and"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.match.title.query == "Spring Boot 入门教程"
@@ -50,7 +50,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [keyword: "Elasticsearch", fields: ["title^2", "content", "summary^1.5"], matchType: "best_fields"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.multi_match.query == "Elasticsearch"
@@ -75,7 +75,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "content", phrase: "quick brown fox", slop: 2]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.match_phrase.content.query == "quick brown fox"
@@ -99,7 +99,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "title", prefix: "Spring Boo", maxExpansions: 50]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.match_phrase_prefix.title.query == "Spring Boo"
@@ -122,7 +122,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [queryStr: "(java OR python) AND tutorial", defaultField: "content", defaultOperator: "AND"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.query_string.query == "(java OR python) AND tutorial"
@@ -149,7 +149,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "status", value: "published", boost: 1.5]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.term.status.value == "published"
@@ -170,7 +170,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "category", values: ["tech", "programming", "tutorial"]]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.terms.category == ["tech", "programming", "tutorial"]
@@ -195,7 +195,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "publish_date", startDate: "2024-01-01", endDate: "2024-12-31", format: "yyyy-MM-dd"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.range.publish_date.gte == "2024-01-01"
@@ -220,7 +220,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "view_count", minValue: 100, maxValue: 10000]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.range.view_count.gt == 100
@@ -241,7 +241,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "author"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.exists.field == "author"
@@ -261,7 +261,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [idList: ["article_001", "article_002", "article_003"]]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.ids.values == ["article_001", "article_002", "article_003"]
@@ -285,7 +285,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "title", pattern: "Spring*Boot", boost: 1.0]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.wildcard.title.value == "Spring*Boot"
@@ -308,7 +308,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "title", prefix: "Java"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.prefix.title.value == "Java"
@@ -332,7 +332,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "title", value: "Elastcsearch", fuzziness: "AUTO", prefixLength: 2]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.fuzzy.title.value == "Elastcsearch"
@@ -357,7 +357,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "title", pattern: "java.*tutorial", flags: "ALL"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.regexp.title.value == "java.*tutorial"
@@ -398,7 +398,7 @@ class EsQueryTemplateEngineTestV3 {
                 filterField: "view_count", filterMin: 100,
                 minMatch: 1
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.bool.must[0].match.title == "Elasticsearch"
@@ -432,7 +432,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [positiveField: "content", positiveValue: "java", negativeField: "status", negativeValue: "outdated", negativeBoost: 0.5]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.boosting.positive.match.content == "java"
@@ -459,7 +459,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "status", value: "published", boost: 1.2]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.constant_score.filter.term.status == "published"
@@ -484,7 +484,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field1: "title", value1: "java", field2: "content", value2: "java", tieBreaker: 0.7]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.dis_max.queries[0].match.title == "java"
@@ -516,7 +516,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [path: "comments", scoreMode: "avg", nestedField: "comments.content", nestedValue: "great article"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.nested.path == "comments"
@@ -544,7 +544,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [childType: "comment", scoreMode: "max", childField: "rating", childValue: "5"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.has_child.type == "comment"
@@ -572,7 +572,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [parentType: "article", score: true, parentField: "author", parentValue: "john"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.has_parent.parent_type == "article"
@@ -600,7 +600,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [aggName: "category_count", field: "category.keyword", size: 10]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.size == 0
@@ -628,7 +628,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [aggName: "monthly_posts", field: "publish_date", interval: "month", format: "yyyy-MM", minDocCount: 0]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.aggs.monthly_posts.date_histogram.field == "publish_date"
@@ -670,7 +670,7 @@ class EsQueryTemplateEngineTestV3 {
                 minField: "view_count",
                 cardinalityField: "author.keyword"
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.aggs.total_views.sum.field == "view_count"
@@ -716,7 +716,7 @@ class EsQueryTemplateEngineTestV3 {
                 sortField: "view_count",
                 sortOrder: "desc"
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.aggs.by_category.terms.field == "category.keyword"
@@ -756,7 +756,7 @@ class EsQueryTemplateEngineTestV3 {
                 innerAggName: "avg_views",
                 innerField: "view_count"
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.aggs.by_author.terms.field == "author.keyword"
@@ -780,7 +780,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [from: 20, size: 10]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.from == 20
@@ -807,7 +807,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [size: 10, searchAfter: ["2024-03-15T10:30:00Z", "article_12345"]]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.size == 10
@@ -831,7 +831,7 @@ class EsQueryTemplateEngineTestV3 {
         '''
         // 注：scroll 参数通常在请求 URL 中，这里测试查询体
         def params = [size: 1000, field: "status", value: "published"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.size == 1000
@@ -853,7 +853,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [sortField: "publish_date", sortOrder: "desc"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.sort[0].publish_date.order == "desc"
@@ -878,7 +878,7 @@ class EsQueryTemplateEngineTestV3 {
                 sortField2: "publish_date", sortOrder2: "desc",
                 sortField3: "_score", sortOrder3: "desc"
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.sort[0].is_top.order == "desc"
@@ -915,7 +915,7 @@ class EsQueryTemplateEngineTestV3 {
                 filterField: "comments.type",
                 filterValue: "verified"
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.sort[0]["comments.rating"].order == "desc"
@@ -939,7 +939,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "content", value: "elasticsearch", scoreOrder: "desc", secondaryField: "publish_date", secondaryOrder: "desc"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.sort[0]._score.order == "desc"
@@ -976,7 +976,7 @@ class EsQueryTemplateEngineTestV3 {
                 unit: "km",
                 distanceType: "arc"
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.sort[0]._geo_distance.location.lat == 39.9042
@@ -1020,7 +1020,7 @@ class EsQueryTemplateEngineTestV3 {
                 highlightField2: "content",
                 fragments2: 3
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.highlight.pre_tags == ["<em class='highlight'>"]
@@ -1048,7 +1048,7 @@ class EsQueryTemplateEngineTestV3 {
                 includeFields: ["title", "author", "publish_date", "category"],
                 excludeFields: ["content", "raw_html"]
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json._source.includes == ["title", "author", "publish_date", "category"]
@@ -1081,7 +1081,7 @@ class EsQueryTemplateEngineTestV3 {
                 scriptSource: "doc['view_count'].value * 0.1 + doc['like_count'].value * 0.5",
                 lang: "painless"
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.script_fields.calculated_score.script.source == "doc['view_count'].value * 0.1 + doc['like_count'].value * 0.5"
@@ -1114,7 +1114,7 @@ class EsQueryTemplateEngineTestV3 {
                 scriptSource: "doc['view_count'].value > params.threshold",
                 threshold: 1000
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.bool.filter.script.script.source == "doc['view_count'].value > params.threshold"
@@ -1150,7 +1150,7 @@ class EsQueryTemplateEngineTestV3 {
                 factor: 2,
                 sortOrder: "desc"
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.sort[0]._script.type == "number"
@@ -1186,7 +1186,7 @@ class EsQueryTemplateEngineTestV3 {
                 innerSortField: "publish_date",
                 innerSortOrder: "desc"
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.collapse.field == "author.keyword"
@@ -1223,7 +1223,7 @@ class EsQueryTemplateEngineTestV3 {
                 filterField: "category.keyword",
                 filterValue: "java"
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.match.content == "programming"
@@ -1304,7 +1304,7 @@ class EsQueryTemplateEngineTestV3 {
                 scoreMode: "sum",
                 boostMode: "multiply"
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.function_score.query.match.title == "elasticsearch"
@@ -1346,7 +1346,7 @@ class EsQueryTemplateEngineTestV3 {
                 suggestMode: "popular",
                 suggestSize: 5
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.suggest.title_suggestion.text == "elasticsaerch"
@@ -1382,7 +1382,7 @@ class EsQueryTemplateEngineTestV3 {
                 confidence: 1.0,
                 maxErrors: 2
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.suggest.phrase_suggestion.text == "elastic serch tutoral"
@@ -1420,7 +1420,7 @@ class EsQueryTemplateEngineTestV3 {
                 skipDuplicates: true,
                 fuzziness: "AUTO"
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.suggest.title_autocomplete.prefix == "Spri"
@@ -1453,7 +1453,7 @@ class EsQueryTemplateEngineTestV3 {
         '''
         // 只提供 titleKeyword，缺失 contentKeyword 和 status
         def params = [titleKeyword: "Elasticsearch"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         // 验证结构完整性：只保留有值的 match
@@ -1481,7 +1481,7 @@ class EsQueryTemplateEngineTestV3 {
         def exceptionThrown = false
         def exceptionMessage = ""
         try {
-            EsQueryTemplateEngine.resolveStrict(template, params)
+            EsQueryTemplateEngineV3.resolveStrict(template, params)
         } catch (IllegalArgumentException e) {
             exceptionThrown = true
             exceptionMessage = e.message
@@ -1510,7 +1510,7 @@ class EsQueryTemplateEngineTestV3 {
             "size": {size}
         }
         '''
-        def variables = EsQueryTemplateEngine.extractVariables(template)
+        def variables = EsQueryTemplateEngineV3.extractVariables(template)
 
         assert variables.contains("field1")
         assert variables.contains("value1")
@@ -1537,7 +1537,7 @@ class EsQueryTemplateEngineTestV3 {
         '''
         // 只提供部分变量
         def params = [field: "title", from: 0]
-        def missing = EsQueryTemplateEngine.validate(template, params)
+        def missing = EsQueryTemplateEngineV3.validate(template, params)
 
         assert missing.contains("keyword")
         assert missing.contains("size")
@@ -1564,7 +1564,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [sortField: "create_time", sortOrder: "desc", aggName: "by_category", aggField: "category.keyword"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         // 验证 key 被正确替换
@@ -1622,7 +1622,7 @@ class EsQueryTemplateEngineTestV3 {
                 innerAgg: "top_keywords",
                 innerAggField: "comments.keywords"
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         // 验证深层嵌套变量都被正确替换
@@ -1639,7 +1639,7 @@ class EsQueryTemplateEngineTestV3 {
     static void testEmptyTemplate() {
         def template = '{}'
         def params = [field: "title"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json == [:]
@@ -1657,7 +1657,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [:]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.match_all == [:]
@@ -1680,7 +1680,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [:]  // 不提供任何变量
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         // 宽松模式下，所有子句被移除，bool/must 为空也被清理
@@ -1702,7 +1702,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [someUnusedVar: "value"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.match_all == [:]
@@ -1736,7 +1736,7 @@ class EsQueryTemplateEngineTestV3 {
                 minScore: 3.5,
                 sourceFields: ["title", "content"]
         ]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         // 验证类型保持
@@ -1769,7 +1769,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "title", value: "test", size: 10]
-        def result = EsQueryTemplateEngine.resolveToMap(template, params)
+        def result = EsQueryTemplateEngineV3.resolveToMap(template, params)
 
         // 验证返回的是 Map 类型
         assert result instanceof Map
@@ -1792,7 +1792,7 @@ class EsQueryTemplateEngineTestV3 {
         }
         '''
         def params = [field: "title", value: "elasticsearch"]
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         assert json.query.query_string.query == "title:elasticsearch AND status:published"
@@ -1817,7 +1817,7 @@ class EsQueryTemplateEngineTestV3 {
 
         // 引擎参数值是直接替换，不会触发深度检测
         // FastJSON 序列化时会正常处理深层嵌套
-        def result = EsQueryTemplateEngine.resolve(template, params)
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
         def json = JSON.parse(result)
 
         // 验证深层嵌套结构被正确保留
@@ -1835,7 +1835,7 @@ class EsQueryTemplateEngineTestV3 {
         json.append('"{value}"')
         100.times { json.append('}') }
 
-        def result = EsQueryTemplateEngine.resolve(json.toString(), [value: "deep"])
+        def result = EsQueryTemplateEngineV3.resolve(json.toString(), [value: "deep"])
         def parsed = JSON.parse(result)
         // 验证最深层的值被正确替换
         def current = parsed
@@ -1854,7 +1854,7 @@ class EsQueryTemplateEngineTestV3 {
         600.times { json.append('}') }
 
         try {
-            EsQueryTemplateEngine.resolve(json.toString(), [v: "test"])
+            EsQueryTemplateEngineV3.resolve(json.toString(), [v: "test"])
             assert false : "应该抛出深度限制异常"
         } catch (IllegalArgumentException e) {
             // 引擎深度检测触发的异常
@@ -1874,7 +1874,7 @@ class EsQueryTemplateEngineTestV3 {
         try {
             // 使用 Object 类型变量来绕过 Groovy 静态类型检查
             Object invalidParams = "not a map"
-            EsQueryTemplateEngine.resolve(template, invalidParams as Map)
+            EsQueryTemplateEngineV3.resolve(template, invalidParams as Map)
             assert false : "应该抛出类型异常"
         } catch (ClassCastException | IllegalArgumentException e) {
             // ClassCastException: Groovy 转换失败
@@ -1891,7 +1891,7 @@ class EsQueryTemplateEngineTestV3 {
      */
     static void testArrayTemplateJson() {
         try {
-            EsQueryTemplateEngine.resolve('[1, 2, 3]', [:])
+            EsQueryTemplateEngineV3.resolve('[1, 2, 3]', [:])
             assert false : "应该抛出类型异常"
         } catch (IllegalArgumentException e) {
             assert e.message.contains("对象") || e.message.contains("Object") || e.message.contains("数组")
@@ -1904,19 +1904,19 @@ class EsQueryTemplateEngineTestV3 {
     static void testSpecialCharVariableNames() {
         // 短横线变量名
         def template1 = '{"query": {"term": {"user-id": "{user-id}"}}}'
-        def result1 = EsQueryTemplateEngine.resolve(template1, ["user-id": "U001"])
+        def result1 = EsQueryTemplateEngineV3.resolve(template1, ["user-id": "U001"])
         def json1 = JSON.parse(result1)
         assert json1.query.term["user-id"] == "U001"
 
         // 点号变量名
         def template2 = '{"query": {"term": {"{field.name}": "{field.value}"}}}'
-        def result2 = EsQueryTemplateEngine.resolve(template2, ["field.name": "status", "field.value": "active"])
+        def result2 = EsQueryTemplateEngineV3.resolve(template2, ["field.name": "status", "field.value": "active"])
         def json2 = JSON.parse(result2)
         assert json2.query.term.status == "active"
 
         // 混合变量名
         def template3 = '{"filter": "{my-filter.type}"}'
-        def result3 = EsQueryTemplateEngine.resolve(template3, ["my-filter.type": "range"])
+        def result3 = EsQueryTemplateEngineV3.resolve(template3, ["my-filter.type": "range"])
         def json3 = JSON.parse(result3)
         assert json3.filter == "range"
     }
@@ -1927,7 +1927,7 @@ class EsQueryTemplateEngineTestV3 {
     static void testNullParamValue() {
         // 完全匹配变量值为 null —— 应保留为 JSON null
         def template = '{"status": "{statusCode}", "name": "{name}"}'
-        def result = EsQueryTemplateEngine.resolve(template, [statusCode: null, name: "test"])
+        def result = EsQueryTemplateEngineV3.resolve(template, [statusCode: null, name: "test"])
         def json = JSON.parse(result)
         assert json.status == null
         assert json.name == "test"
@@ -1938,7 +1938,7 @@ class EsQueryTemplateEngineTestV3 {
      */
     static void testExtractVariablesWithSpecialChars() {
         def template = '{"a": "{user-id}", "b": "{user.name}", "c": "{normal_var}"}'
-        def vars = EsQueryTemplateEngine.extractVariables(template)
+        def vars = EsQueryTemplateEngineV3.extractVariables(template)
         assert vars.contains("user-id")
         assert vars.contains("user.name")
         assert vars.contains("normal_var")

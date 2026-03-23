@@ -1,4 +1,6 @@
 import com.alibaba.fastjson.JSON
+import com.alibaba.fastjson.JSONObject
+import com.alibaba.fastjson.JSONArray
 import com.cornucopib.engine.EsQueryTemplateEngineV3
 
 /**
@@ -1799,6 +1801,90 @@ class EsQueryTemplateEngineTestV3 {
         assert json.query.query_string.query == "title:elasticsearch AND status:published"
     }
 
+    /**
+     * 测试子句级移除 - 变量缺失时整个子句（含静态字段）应从数组中移除
+     *
+     * 【Bug 背景】
+     * 在宽松模式下，当数组（如 must/should 等）中的 Map 元素包含缺失变量时，
+     * 引擎只删除了变量所在的字段，但元素中的静态配置字段（如 path、minimum_should_match、boost 等）
+     * 阻止了 isEffectivelyEmpty 判定为空，导致残留的"骨架子句"留在数组中。
+     *
+     * 【修复方案】
+     * 使用 hadRemoval 机制：子树中任何 REMOVE_SENTINEL 删除 → 整个 Map 元素从 List 移除
+     */
+    static void testClauseLevelRemoval() {
+        String template = '''
+        {
+            "query": {
+                "bool": {
+                    "must": [
+                        {
+                            "nested": {
+                                "path": "scores",
+                                "query": {
+                                    "bool": {
+                                        "must": [
+                                            {"match": {"scores.subject": "{name}"}},
+                                            {"range": {"scores.score": {"gte": "{score}"}}}
+                                        ]
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "match": {
+                                "team.analyzer_none": {
+                                    "query": "{team}",
+                                    "minimum_should_match": 1
+                                }
+                            }
+                        }
+                    ]
+                }
+            },
+            "from": "{from}",
+            "size": "{size}"
+        }
+        '''
+
+        // 所有变量缺失 → 所有子句从 must 中移除
+        Map result = EsQueryTemplateEngineV3.resolveToMap(template, [:])
+
+        // must 中的两个子句都应被完全移除（不应残留 path 或 minimum_should_match）
+        assert result.query == null || result.query.bool == null || result.query.bool.must == null || result.query.bool.must.isEmpty()
+
+        // from 和 size 也应被移除
+        assert result.from == null
+        assert result.size == null
+    }
+
+    /**
+     * 测试子句级移除 - 部分变量存在时的行为
+     */
+    static void testClauseLevelRemovalPartial() {
+        String template = '''
+        {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"term": {"status": "{status}"}},
+                        {"match": {"title": {"query": "{keyword}", "boost": 2}}}
+                    ]
+                }
+            }
+        }
+        '''
+
+        // 只有 status 存在，keyword 缺失
+        Map result = EsQueryTemplateEngineV3.resolveToMap(template, [status: "active"])
+
+        // status 子句应保留
+        assert result.query.bool.must.size() == 1
+        assert result.query.bool.must[0].term.status == "active"
+        // keyword 子句应被完全移除（不应残留 boost: 2）
+    }
+
+
     // ==================== 十六、边界测试 ====================
 
     /**
@@ -1946,60 +2032,113 @@ class EsQueryTemplateEngineTestV3 {
         assert vars.size() == 3
     }
 
+    // ==================== 十七、hadRemoval 修复测试 ====================
+
     /**
-     * 测试 terms 聚合 - 按字段分组
+     * 测试过度删除防护 - 嵌套 bool 中部分变量缺失，有效子句应保留
      */
-    static void test1() {
-        def template = '''
- {
-    "query": {
-        "bool": {
-            "must": [
-                {
-                    "nested": {
-                        "path": "scores",
-                        "query": {
+    static void testOverRemovalPrevention() {
+        String template = '''
+        {
+            "query": {
+                "bool": {
+                    "must": [
+                        {
                             "bool": {
-                                "must": [
-                                    {
-                                        "match": {
-                                            "scores.subject": "{name}"
-                                        }
-                                    },
-                                    {
-                                        "range": {
-                                            "scores.score": {
-                                                "gte": "{score}"
-                                            }
-                                        }
-                                    }
+                                "should": [
+                                    {"match": {"title": "{keyword}"}},
+                                    {"term": {"status": "active"}}
                                 ]
                             }
-                        }
-                    }
-                },
-                {
-                    "match": {
-                        "team.analyzer_none": {
-                            "query": "{team}",
-                            "minimum_should_match": 1
-                        }
+                        },
+                        {"range": {"date": {"gte": "{start_date}"}}}
+                    ]
+                }
+            }
+        }
+        '''
+
+        // keyword 缺失，start_date 存在 → inner bool 中 match 移除，term 保留
+        Map result = EsQueryTemplateEngineV3.resolveToMap(template, [start_date: "2024-01-01"])
+
+        // must 应有 2 个元素：inner bool（含 term）+ range
+        assert result.query.bool.must.size() == 2
+        // inner bool 的 should 应只剩 term
+        def innerBool = result.query.bool.must.find { it.bool != null }
+        assert innerBool.bool.should.size() == 1
+        assert innerBool.bool.should[0].term.status == "active"
+        // range 应保留
+        def rangeClause = result.query.bool.must.find { it.range != null }
+        assert rangeClause.range.date.gte == "2024-01-01"
+    }
+
+    /**
+     * 测试配置字段残留清理 - bool 查询所有 should 变量缺失，只剩 minimum_should_match
+     */
+    static void testConfigOnlyFieldsCleanup() {
+        String template = '''
+        {
+            "query": {
+                "bool": {
+                    "should": [
+                        {"match": {"title": "{keyword}"}},
+                        {"match": {"content": "{content}"}}
+                    ],
+                    "minimum_should_match": 1
+                }
+            }
+        }
+        '''
+
+        Map result = EsQueryTemplateEngineV3.resolveToMap(template, [:])
+
+        // 所有变量缺失 → should 清空 → bool 只剩 minimum_should_match（配置字段）→ 视为空 → query 整体移除
+        assert result.query == null || result.isEmpty()
+    }
+
+    /**
+     * 测试 nested 配置残留清理 - 独立 nested 查询（非数组内）
+     */
+    static void testNestedConfigOnlyCleanup() {
+        String template = '''
+        {
+            "query": {
+                "nested": {
+                    "path": "comments",
+                    "query": {
+                        "match": {"comments.text": "{searchText}"}
                     }
                 }
-            ]
+            }
         }
-    },
-    "from": "{from}",
-    "size": "{size}"
-}
         '''
-        def params = [two_week_key_update_date_1: "2026-03-23"]
-        def result = EsQueryTemplateEngineV3.resolve(template, params)
-        def json = JSON.parse(result)
 
-        assert json.size == 0
-        assert json.aggs.category_count.terms.field == "category.keyword"
-        assert json.aggs.category_count.terms.size == 10
+        Map result = EsQueryTemplateEngineV3.resolveToMap(template, [:])
+
+        // searchText 缺失 → match 空 → inner query 移除 → nested 只剩 path（配置字段）→ 视为空 → query 移除
+        assert result.query == null || result.isEmpty()
+    }
+
+    /**
+     * 测试 function_score 配置残留清理
+     */
+    static void testFunctionScoreConfigCleanup() {
+        String template = '''
+        {
+            "query": {
+                "function_score": {
+                    "query": {"match": {"title": "{keyword}"}},
+                    "boost_mode": "multiply",
+                    "max_boost": 42
+                }
+            }
+        }
+        '''
+
+        Map result = EsQueryTemplateEngineV3.resolveToMap(template, [:])
+
+        // keyword 缺失 → match 空 → query 移除 → function_score 只剩 boost_mode + max_boost（配置字段）→ 清理
+        assert result.query == null || result.isEmpty()
     }
 
     // ==================== 主方法 ====================
@@ -2169,6 +2308,10 @@ class EsQueryTemplateEngineTestV3 {
         println "✓ testResolveToMap passed"
         testStringInterpolation()
         println "✓ testStringInterpolation passed"
+        testClauseLevelRemoval()
+        println "✓ testClauseLevelRemoval passed"
+        testClauseLevelRemovalPartial()
+        println "✓ testClauseLevelRemovalPartial passed"
 
         // 十六、边界测试
         println "\n=== 十六、边界测试 ==="
@@ -2189,10 +2332,19 @@ class EsQueryTemplateEngineTestV3 {
         testExtractVariablesWithSpecialChars()
         println "✓ testExtractVariablesWithSpecialChars passed"
 
-        println "\n=========================================="
-        println "All tests passed! (共 68 个测试)"
-        println "=========================================="
+        // 十七、hadRemoval 修复测试
+        println "\n=== 十七、hadRemoval 修复测试 ==="
+        testOverRemovalPrevention()
+        println "✓ testOverRemovalPrevention passed"
+        testConfigOnlyFieldsCleanup()
+        println "✓ testConfigOnlyFieldsCleanup passed"
+        testNestedConfigOnlyCleanup()
+        println "✓ testNestedConfigOnlyCleanup passed"
+        testFunctionScoreConfigCleanup()
+        println "✓ testFunctionScoreConfigCleanup passed"
 
-        test1()
+        println "\n=========================================="
+        println "All tests passed! (共 74 个测试)"
+        println "=========================================="
     }
 }

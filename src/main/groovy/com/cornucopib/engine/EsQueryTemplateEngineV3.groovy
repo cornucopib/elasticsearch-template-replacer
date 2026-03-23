@@ -2,9 +2,9 @@ package com.cornucopib.engine
 
 import com.alibaba.fastjson.JSON
 import com.alibaba.fastjson.serializer.SerializerFeature
-
-import java.util.regex.Matcher
 import java.util.regex.Pattern
+import java.util.regex.Matcher
+import java.util.Collections
 
 /**
  * ES 查询模板解析引擎
@@ -120,6 +120,30 @@ class EsQueryTemplateEngineV3 {
     )
 
     /**
+     * ES 配置/修饰类字段 key
+     *
+     * 【设计原因】
+     * 这些字段单独存在时不构成有效查询，只是修饰/配置其他查询字段的行为。
+     * 例如 {"path": "scores"} 没有 query 配合时毫无意义，
+     * {"minimum_should_match": 1} 没有 should 子句时同样无效。
+     *
+     * 【在 isEffectivelyEmpty 中的作用】
+     * 当 Map 中只剩这些配置字段时，视为"逻辑空"，应被清理。
+     * 这解决了静态配置字段阻止空值检测的问题。
+     *
+     * 【注意】只包含明确"依附性"的配置字段，即这些字段必须配合其他查询字段才有意义。
+     * 不包含那些在其上下文中本身就是有效配置的字段（如排序的 order、高亮的 pre_tags 等）。
+     */
+    private static final Set<String> ES_CONFIG_ONLY_KEYS = Collections.unmodifiableSet([
+            // 通用查询修饰（必须配合实际查询字段）
+            'boost', 'minimum_should_match', '_name',
+            // nested 查询配置（path 必须配合 query）
+            'path', 'score_mode', 'ignore_unmapped',
+            // function_score 配置（必须配合 query 或 functions）
+            'boost_mode', 'max_boost'
+    ] as HashSet)
+
+    /**
      * 宽松模式解析：缺失变量自动移除包含该变量的父级子句
      * @param templateJson ES 模板 JSON 字符串
      * @param params 变量键值对 Map
@@ -128,7 +152,7 @@ class EsQueryTemplateEngineV3 {
     static String resolve(String templateJson, Map<String, Object> params) {
         validateParams(params)
         Map result = resolveToMap(templateJson, params)
-        return JSON.toJSONString(result)
+        return JSON.toJSONString(result, SerializerFeature.PrettyFormat)
     }
 
     /**
@@ -208,19 +232,19 @@ class EsQueryTemplateEngineV3 {
         }
 
         Set<String> variables = new LinkedHashSet<>()
-
-        Matcher matcher = VAR_MATCHER_CACHE.get()
+        Matcher matcher = VAR_MATCHER_CACHE.get().reset(templateJson)
         try {
-            matcher.reset(templateJson)
-
             while (matcher.find()) {
                 variables.add(matcher.group(1))
             }
-
-            return variables
-        }finally {
+        } finally {
+            // 释放 ThreadLocal Matcher 对输入字符串的引用，防止内存泄漏
+            // Matcher.reset(str) 会持有 str 的引用，ThreadLocal 使 Matcher 长期存活
+            // 方法结束后必须释放，否则最后处理的字符串无法被 GC 回收
             matcher.reset("")
         }
+
+        return variables
     }
 
 
@@ -260,6 +284,12 @@ class EsQueryTemplateEngineV3 {
      * - 直接修改 FastJSON 解析后的 Map，避免创建新 Map 的内存开销
      * - 使用 Iterator 遍历而非 for-each，因为需要在遍历中删除元素
      * - for-each 在删除时会抛 ConcurrentModificationException
+     *
+     * 【清理策略】
+     * 完全依赖增强版 isEffectivelyEmpty 进行空值判断：
+     * 1. ES_VALID_EMPTY_KEYS：语义有效空，不清理
+     * 2. ES_CONFIG_ONLY_KEYS：配置字段单独存在视为空，会被清理
+     * 3. 递归检查实际内容
      *
      * @param source 当前 Map 节点
      * @param params 变量键值对
@@ -377,6 +407,12 @@ class EsQueryTemplateEngineV3 {
      * - 倒序遍历时删除元素不影响前面的索引：删除 i=5 不影响 i=0~4
      * - 这是 List 原地删除的经典模式，比 Iterator 更高效（无需创建 Iterator 对象）
      *
+     * 【Map 元素清理策略】
+     * 完全依赖增强版 isEffectivelyEmpty 判断 Map 元素是否应移除：
+     * 1. ES_VALID_EMPTY_KEYS：语义有效空（如 match_all），保留
+     * 2. ES_CONFIG_ONLY_KEYS：只剩配置字段（如 minimum_should_match），视为空，移除
+     * 3. 递归检查实际内容
+     *
      * @param source 当前 List 节点
      * @param params 变量键值对
      * @param strict 是否严格模式
@@ -407,14 +443,13 @@ class EsQueryTemplateEngineV3 {
                     }
                 }
             } else if (item instanceof Map) {
+                // 递归处理子 Map，然后使用增强版 isEffectivelyEmpty 判断
                 resolveAndCleanMap((Map) item, params, strict, depth + 1)
-                // 移除逻辑空 Map（List 中的空 Map 通常无意义）
                 if (isEffectivelyEmpty(item)) {
                     source.remove(i)
                 }
             } else if (item instanceof List) {
                 resolveAndCleanList((List) item, params, strict, depth + 1)
-                // 移除空 List（嵌套空数组无意义）
                 if (((List) item).isEmpty()) {
                     source.remove(i)
                 }
@@ -445,10 +480,8 @@ class EsQueryTemplateEngineV3 {
     private static Object resolveString(String str, Map<String, Object> params, boolean strict) {
         if (str == null || str.isEmpty()) return str
 
-        Matcher m = VAR_MATCHER_CACHE.get()
+        Matcher m = VAR_MATCHER_CACHE.get().reset(str)
         try {
-            m.reset(str)
-
             // === 第一段：完全匹配检查（复用 VAR_PATTERN + matches()）===
             // 【优化】matches() 要求整个字符串匹配正则，等价于 ^{var}$，无需单独的 EXACT_VAR_PATTERN
             if (m.matches()) {
@@ -465,7 +498,7 @@ class EsQueryTemplateEngineV3 {
             // === 第二段：单次遍历完成"有无变量"判断和插值替换 ===
             // 【优化】原版先 find() 判断有无变量，reset() 后再 while(find()) 遍历，共 2 次扫描
             // 现在合并为 1 次 while(find()) 遍历，用 found 标记判断有无变量
-            m.reset()
+            m.reset()  // 无参 reset()：重置匹配位置，不改变输入字符串
             // 注：Java 8 的 Matcher.appendReplacement 不支持 StringBuilder，必须用 StringBuffer
             StringBuffer sb = new StringBuffer()
             boolean found = false
@@ -502,7 +535,10 @@ class EsQueryTemplateEngineV3 {
             }
 
             return sb.toString()
-        }finally {
+        } finally {
+            // 释放 ThreadLocal Matcher 对输入字符串的引用，防止内存泄漏
+            // Matcher.reset(str) 会持有 str 的引用，ThreadLocal 使 Matcher 长期存活
+            // 方法结束后必须释放，否则最后处理的字符串无法被 GC 回收
             m.reset("")
         }
     }
@@ -514,17 +550,18 @@ class EsQueryTemplateEngineV3 {
      * - 逻辑空：数据结构为空（null、{}、[]）
      * - 语义有效空：在 ES 中空值本身有意义（如 match_all: {}）
      *
+     * 【三层检查逻辑】
+     * 1. ES_VALID_EMPTY_KEYS：这些 key 即使 value 为空也有效，短路返回 false
+     * 2. ES_CONFIG_ONLY_KEYS：配置类字段单独存在无意义，跳过不算实质内容
+     * 3. 递归检查 value：非配置 key 的 value 是否有实质内容
+     *
      * 【判断规则】
      * - null → 空
      * - 空 Map {} → 空（除非包含 ES_VALID_EMPTY_KEYS）
-     * - Map 中所有 value 都是逻辑空 → 空（如 {match: {}}）
+     * - Map 中所有 value 都是逻辑空，或只剩 ES_CONFIG_ONLY_KEYS → 空
      * - 空 List [] → 空
      * - List 中所有元素都是逻辑空 → 空
      * - 基本类型/非空字符串 → 非空
-     *
-     * 【单次遍历优化】
-     * 合并 key 检查和 value 检查到同一个 entrySet 循环中，
-     * 避免先遍历 keySet 再遍历 values 的双重遍历开销
      */
     private static boolean isEffectivelyEmpty(Object node) {
         if (node == null) return true
@@ -533,18 +570,23 @@ class EsQueryTemplateEngineV3 {
             Map m = (Map) node
             if (m.isEmpty()) return true
 
-            // 单次遍历 entrySet：同时检查 key 白名单和 value 空值
+            // 单次遍历 entrySet：三层检查
             for (Map.Entry entry : m.entrySet()) {
-                // 优先检查 key：如果是 ES 语义有效空的 key，整个 Map 视为非空
-                if (ES_VALID_EMPTY_KEYS.contains(entry.getKey().toString())) {
+                String key = entry.getKey().toString()
+                // 第一层：优先检查 ES 语义有效空的 key → 整个 Map 视为非空
+                if (ES_VALID_EMPTY_KEYS.contains(key)) {
                     return false  // 短路返回：match_all:{} 是有效查询
                 }
-                // 检查 value：只要有一个非空 value，整个 Map 就非空
+                // 第二层：配置类字段跳过 → 单独存在时不构成有效查询内容
+                if (ES_CONFIG_ONLY_KEYS.contains(key)) {
+                    continue
+                }
+                // 第三层：非配置 key → 检查 value 是否有实质内容
                 if (!isEffectivelyEmpty(entry.getValue())) {
                     return false
                 }
             }
-            return true  // 所有 value 都是空的
+            return true  // 所有 value 都是空的，或只剩配置字段
         }
 
         if (node instanceof List) {

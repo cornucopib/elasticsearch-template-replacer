@@ -1,4 +1,5 @@
 import com.alibaba.fastjson.JSON
+import com.cornucopib.engine.EsQueryTemplateEngineV1
 
 /**
  * ES 查询模板引擎测试

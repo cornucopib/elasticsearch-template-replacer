@@ -1,4 +1,5 @@
 import com.alibaba.fastjson.JSON
+import com.cornucopib.engine.EsQueryTemplateEngineV3
 
 /**
  * ES 查询模板引擎测试
@@ -1945,6 +1946,62 @@ class EsQueryTemplateEngineTestV3 {
         assert vars.size() == 3
     }
 
+    /**
+     * 测试 terms 聚合 - 按字段分组
+     */
+    static void test1() {
+        def template = '''
+ {
+    "query": {
+        "bool": {
+            "must": [
+                {
+                    "nested": {
+                        "path": "scores",
+                        "query": {
+                            "bool": {
+                                "must": [
+                                    {
+                                        "match": {
+                                            "scores.subject": "{name}"
+                                        }
+                                    },
+                                    {
+                                        "range": {
+                                            "scores.score": {
+                                                "gte": "{score}"
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                },
+                {
+                    "match": {
+                        "team.analyzer_none": {
+                            "query": "{team}",
+                            "minimum_should_match": 1
+                        }
+                    }
+                }
+            ]
+        }
+    },
+    "from": "{from}",
+    "size": "{size}"
+}
+        '''
+        def params = [two_week_key_update_date_1: "2026-03-23"]
+        def result = EsQueryTemplateEngineV3.resolve(template, params)
+        def json = JSON.parse(result)
+
+        assert json.size == 0
+        assert json.aggs.category_count.terms.field == "category.keyword"
+        assert json.aggs.category_count.terms.size == 10
+    }
+
     // ==================== 主方法 ====================
 
     static void main(String[] args) {
@@ -2135,5 +2192,7 @@ class EsQueryTemplateEngineTestV3 {
         println "\n=========================================="
         println "All tests passed! (共 68 个测试)"
         println "=========================================="
+
+        test1()
     }
 }

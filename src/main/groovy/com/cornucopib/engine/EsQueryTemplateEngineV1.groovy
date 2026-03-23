@@ -1,4 +1,4 @@
-
+package com.cornucopib.engine
 
 import com.alibaba.fastjson.JSON
 import com.alibaba.fastjson.serializer.SerializerFeature

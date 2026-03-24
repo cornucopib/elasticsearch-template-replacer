@@ -346,6 +346,12 @@ class EsQueryTemplateEngineV3 {
                     if (resolved.is(REMOVE_SENTINEL)) {
                         iter.remove()
                         entryRemoved = true
+                    } else if (resolved instanceof List) {
+                        // 【Map 值数组拼接】变量值为数组时，拼接为逗号分隔字符串
+                        // 与 List 中的数组展开互补：List 上下文展开，Map 值上下文拼接
+                        // 使用场景：ES match 查询 {"match": {"field": "{keywords}"}} + keywords=["k1","k2"]
+                        // 拼接结果："field": "k1,k2"，利用 ES 分词能力匹配多个关键词
+                        entry.setValue(((List) resolved).join(','))
                     } else {
                         entry.setValue(resolved)
                     }
@@ -438,6 +444,13 @@ class EsQueryTemplateEngineV3 {
                     Object resolved = resolveString((String) item, params, strict)
                     if (resolved.is(REMOVE_SENTINEL)) {
                         source.remove(i)  // 倒序删除，索引安全
+                    } else if (resolved instanceof List) {
+                        // 【数组展开】变量值为数组时，展开到父数组中，避免双层嵌套
+                        // 例：模板 ["{ids}"] + ids=[1,2,3] → [1,2,3]，而非 [[1,2,3]]
+                        // 使用场景：ES terms 查询 {"terms": {"field": ["{values}"]}}
+                        // 倒序遍历保证 addAll 插入多个元素后不影响前面的索引
+                        source.remove(i)
+                        source.addAll(i, (List) resolved)
                     } else {
                         source.set(i, resolved)
                     }

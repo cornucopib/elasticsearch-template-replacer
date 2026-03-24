@@ -3,6 +3,7 @@ import com.alibaba.fastjson.JSONObject
 import com.alibaba.fastjson.JSONArray
 import com.cornucopib.engine.EsQueryTemplateEngineV3
 
+
 /**
  * ES 查询模板引擎测试
  * 使用 Groovy 原生 assert 断言，覆盖 ES 全部核心语法
@@ -46,7 +47,7 @@ class EsQueryTemplateEngineTestV3 {
             "query": {
                 "multi_match": {
                     "query": "{keyword}",
-                    "fields": "{fields}",
+                    "fields": ["{fields}"],
                     "type": "{matchType}"
                 }
             }
@@ -167,7 +168,7 @@ class EsQueryTemplateEngineTestV3 {
         {
             "query": {
                 "terms": {
-                    "{field}": "{values}"
+                    "{field}": ["{values}"]
                 }
             }
         }
@@ -258,7 +259,7 @@ class EsQueryTemplateEngineTestV3 {
         {
             "query": {
                 "ids": {
-                    "values": "{idList}"
+                    "values": ["{idList}"]
                 }
             }
         }
@@ -700,7 +701,7 @@ class EsQueryTemplateEngineTestV3 {
                         "top_articles": {
                             "top_hits": {
                                 "size": "{topSize}",
-                                "_source": "{sourceFields}",
+                                "_source": ["{sourceFields}"],
                                 "sort": [
                                     {"{sortField}": {"order": "{sortOrder}"}}
                                 ]
@@ -806,7 +807,7 @@ class EsQueryTemplateEngineTestV3 {
                 {"publish_date": "desc"},
                 {"_id": "asc"}
             ],
-            "search_after": "{searchAfter}"
+            "search_after": ["{searchAfter}"]
         }
         '''
         def params = [size: 10, searchAfter: ["2024-03-15T10:30:00Z", "article_12345"]]
@@ -1000,8 +1001,8 @@ class EsQueryTemplateEngineTestV3 {
                 "match": {"{queryField}": "{queryValue}"}
             },
             "highlight": {
-                "pre_tags": "{preTags}",
-                "post_tags": "{postTags}",
+                "pre_tags": ["{preTags}"],
+                "post_tags": ["{postTags}"],
                 "fields": {
                     "{highlightField1}": {
                         "number_of_fragments": "{fragments1}"
@@ -1042,8 +1043,8 @@ class EsQueryTemplateEngineTestV3 {
         {
             "query": {"match_all": {}},
             "_source": {
-                "includes": "{includeFields}",
-                "excludes": "{excludeFields}"
+                "includes": ["{includeFields}"],
+                "excludes": ["{excludeFields}"]
             }
         }
         '''
@@ -1723,13 +1724,13 @@ class EsQueryTemplateEngineTestV3 {
             "query": {
                 "bool": {
                     "must": [
-                        {"terms": {"tags": "{tagList}"}},
+                        {"terms": {"tags": ["{tagList}"]}},
                         {"term": {"is_active": "{isActive}"}},
                         {"range": {"score": {"gte": "{minScore}"}}}
                     ]
                 }
             },
-            "_source": "{sourceFields}"
+            "_source": ["{sourceFields}"]
         }
         '''
         def params = [
@@ -1986,6 +1987,52 @@ class EsQueryTemplateEngineTestV3 {
     }
 
     /**
+     * 测试数组变量展开 - terms 查询中数组参数应展开而非嵌套
+     */
+    static void testArraySpreadInList() {
+        // terms 查询：变量值为数组时，应展开到父数组中
+        String template = '''
+        {
+            "query": {
+                "terms": {
+                    "status": ["{statusList}"]
+                }
+            }
+        }
+        '''
+
+        // 数组参数 → 应展开为 [1, 2, 3]，而非 [[1, 2, 3]]
+        Map result = EsQueryTemplateEngineV3.resolveToMap(template, [statusList: [1, 2, 3]])
+        assert result.query.terms.status == [1, 2, 3]
+        assert !(result.query.terms.status[0] instanceof List)  // 确认不是双层数组
+
+        // 字符串数组
+        result = EsQueryTemplateEngineV3.resolveToMap(template, [statusList: ["active", "pending"]])
+        assert result.query.terms.status == ["active", "pending"]
+
+        // 空数组 → 展开后等价于空数组，terms 节点可能被清理
+        result = EsQueryTemplateEngineV3.resolveToMap(template, [statusList: []])
+        assert result.query?.terms?.status == null || result.query?.terms?.status?.isEmpty()
+
+        // 单值非数组 → 正常替换为单元素
+        result = EsQueryTemplateEngineV3.resolveToMap(template, [statusList: "active"])
+        assert result.query.terms.status == ["active"]
+
+        // 数组中有多个变量，部分是数组
+        String template2 = '''
+        {
+            "query": {
+                "terms": {
+                    "ids": ["{idList}", "{extraId}"]
+                }
+            }
+        }
+        '''
+        result = EsQueryTemplateEngineV3.resolveToMap(template2, [idList: [1, 2, 3], extraId: 4])
+        assert result.query.terms.ids == [1, 2, 3, 4]
+    }
+
+    /**
      * 测试含特殊字符的变量名 - 短横线和点号变量名
      */
     static void testSpecialCharVariableNames() {
@@ -2139,6 +2186,48 @@ class EsQueryTemplateEngineTestV3 {
 
         // keyword 缺失 → match 空 → query 移除 → function_score 只剩 boost_mode + max_boost（配置字段）→ 清理
         assert result.query == null || result.isEmpty()
+    }
+
+    /**
+     * 测试 Map 值中数组自动拼接为逗号分隔字符串
+     */
+    static void testArrayJoinInMapValue() {
+        // match 查询：变量值为数组时，应拼接为逗号分隔字符串
+        String template = '''
+        {
+            "query": {
+                "match": {
+                    "a": "{b}",
+                    "minimum_should_match": 1
+                }
+            }
+        }
+        '''
+
+        // 数组参数 → 应拼接为 "v1,v2,v3"
+        Map result = EsQueryTemplateEngineV3.resolveToMap(template, [b: ["v1", "v2", "v3"]])
+        assert result.query.match.a == "v1,v2,v3"
+        assert result.query.match.minimum_should_match == 1
+
+        // 数字数组
+        result = EsQueryTemplateEngineV3.resolveToMap(template, [b: [1, 2, 3]])
+        assert result.query.match.a == "1,2,3"
+
+        // 单元素数组
+        result = EsQueryTemplateEngineV3.resolveToMap(template, [b: ["only"]])
+        assert result.query.match.a == "only"
+
+        // 空数组 → 空字符串
+        result = EsQueryTemplateEngineV3.resolveToMap(template, [b: []])
+        assert result.query.match.a == ""
+
+        // 非数组（字符串）→ 正常替换
+        result = EsQueryTemplateEngineV3.resolveToMap(template, [b: "single"])
+        assert result.query.match.a == "single"
+
+        // 非数组（Map）→ 保持 Map 类型（如 terms 嵌套对象场景）
+        result = EsQueryTemplateEngineV3.resolveToMap(template, [b: [key: "value"]])
+        assert result.query.match.a instanceof Map
     }
 
     // ==================== 主方法 ====================
@@ -2325,6 +2414,8 @@ class EsQueryTemplateEngineTestV3 {
         println "✓ testInvalidParamsType passed"
         testArrayTemplateJson()
         println "✓ testArrayTemplateJson passed"
+        testArraySpreadInList()
+        println "✓ testArraySpreadInList passed"
         testSpecialCharVariableNames()
         println "✓ testSpecialCharVariableNames passed"
         testNullParamValue()
@@ -2343,8 +2434,13 @@ class EsQueryTemplateEngineTestV3 {
         testFunctionScoreConfigCleanup()
         println "✓ testFunctionScoreConfigCleanup passed"
 
+        // 十八、Map 值数组拼接测试
+        println "\n=== 十八、Map 值数组拼接测试 ==="
+        testArrayJoinInMapValue()
+        println "✓ testArrayJoinInMapValue passed"
+
         println "\n=========================================="
-        println "All tests passed! (共 74 个测试)"
+        println "All tests passed! (共 76 个测试)"
         println "=========================================="
     }
 }
